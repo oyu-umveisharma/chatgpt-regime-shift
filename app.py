@@ -461,6 +461,276 @@ def create_regime_chart(data, break_dates):
     return fig
 
 
+def calculate_period_statistics(data, start_date, end_date):
+    """Calculate statistics for a given period."""
+    stats_data = []
+
+    for ticker, df in data.items():
+        # Filter to period
+        mask = (df.index >= start_date) & (df.index <= end_date)
+        period_df = df.loc[mask]
+
+        if len(period_df) < 2:
+            continue
+
+        daily_returns = period_df['Close'].pct_change().dropna()
+
+        if len(daily_returns) < 2:
+            continue
+
+        avg_return = daily_returns.mean() * 252 * 100  # Annualized %
+        volatility = daily_returns.std() * np.sqrt(252) * 100  # Annualized %
+        sharpe = (avg_return / volatility) if volatility > 0 else 0
+
+        stats_data.append({
+            'Ticker': ticker,
+            'Avg Daily Return (Ann. %)': avg_return,
+            'Volatility (Ann. %)': volatility,
+            'Sharpe Ratio': sharpe
+        })
+
+    return pd.DataFrame(stats_data)
+
+
+def create_comparison_table(data, base_date):
+    """Create pre vs post ChatGPT statistics comparison table."""
+    # 6 months before and after
+    pre_start = base_date - pd.Timedelta(days=180)
+    pre_end = base_date - pd.Timedelta(days=1)
+    post_start = base_date
+    post_end = base_date + pd.Timedelta(days=180)
+
+    pre_stats = calculate_period_statistics(data, pre_start, pre_end)
+    post_stats = calculate_period_statistics(data, post_start, post_end)
+
+    if pre_stats.empty or post_stats.empty:
+        return None
+
+    # Merge and format
+    pre_stats = pre_stats.set_index('Ticker').add_suffix(' (Pre)')
+    post_stats = post_stats.set_index('Ticker').add_suffix(' (Post)')
+
+    combined = pre_stats.join(post_stats, how='outer')
+
+    # Reorder columns for better comparison
+    cols = []
+    for metric in ['Avg Daily Return (Ann. %)', 'Volatility (Ann. %)', 'Sharpe Ratio']:
+        cols.extend([f'{metric} (Pre)', f'{metric} (Post)'])
+
+    combined = combined[[c for c in cols if c in combined.columns]]
+
+    return combined.reset_index()
+
+
+def create_correlation_heatmaps(data, base_date):
+    """Create side-by-side correlation heatmaps for pre and post ChatGPT."""
+    # 6 months before and after
+    pre_start = base_date - pd.Timedelta(days=180)
+    pre_end = base_date - pd.Timedelta(days=1)
+    post_start = base_date
+    post_end = base_date + pd.Timedelta(days=180)
+
+    # Build returns DataFrames
+    def get_returns_df(start, end):
+        returns = pd.DataFrame()
+        for ticker, df in data.items():
+            mask = (df.index >= start) & (df.index <= end)
+            period_df = df.loc[mask]
+            if not period_df.empty:
+                returns[ticker] = period_df['Close'].pct_change()
+        return returns.dropna()
+
+    pre_returns = get_returns_df(pre_start, pre_end)
+    post_returns = get_returns_df(post_start, post_end)
+
+    if pre_returns.empty or post_returns.empty:
+        return None
+
+    pre_corr = pre_returns.corr()
+    post_corr = post_returns.corr()
+
+    # Create side-by-side heatmaps
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=(
+            "Pre-ChatGPT Correlations<br>(Jun - Nov 2022)",
+            "Post-ChatGPT Correlations<br>(Dec 2022 - May 2023)"
+        ),
+        horizontal_spacing=0.15
+    )
+
+    # Color scale
+    colorscale = 'RdBu_r'
+
+    # Pre-ChatGPT heatmap
+    fig.add_trace(
+        go.Heatmap(
+            z=pre_corr.values,
+            x=pre_corr.columns,
+            y=pre_corr.index,
+            colorscale=colorscale,
+            zmin=-1, zmax=1,
+            text=np.round(pre_corr.values, 2),
+            texttemplate='%{text}',
+            textfont={"size": 10},
+            showscale=False,
+            hovertemplate='%{x} vs %{y}<br>Correlation: %{z:.2f}<extra></extra>'
+        ),
+        row=1, col=1
+    )
+
+    # Post-ChatGPT heatmap
+    fig.add_trace(
+        go.Heatmap(
+            z=post_corr.values,
+            x=post_corr.columns,
+            y=post_corr.index,
+            colorscale=colorscale,
+            zmin=-1, zmax=1,
+            text=np.round(post_corr.values, 2),
+            texttemplate='%{text}',
+            textfont={"size": 10},
+            showscale=True,
+            colorbar=dict(title='Correlation', x=1.02),
+            hovertemplate='%{x} vs %{y}<br>Correlation: %{z:.2f}<extra></extra>'
+        ),
+        row=1, col=2
+    )
+
+    fig.update_layout(
+        title=dict(
+            text="<b>Correlation Structure: Before vs After ChatGPT Launch</b>",
+            font=dict(size=18)
+        ),
+        template="plotly_white",
+        height=450,
+    )
+
+    return fig
+
+
+def create_chegg_crash_chart(data):
+    """Create cumulative return chart highlighting the Chegg crash period."""
+    # Calculate cumulative returns for all stocks
+    cumulative = pd.DataFrame()
+
+    for ticker, df in data.items():
+        returns = df['Close'].pct_change()
+        cumulative[ticker] = (1 + returns).cumprod()
+
+    cumulative = cumulative.dropna()
+
+    if cumulative.empty:
+        return None
+
+    # Normalize to start at 1
+    cumulative = cumulative / cumulative.iloc[0]
+
+    fig = go.Figure()
+
+    # Color scheme
+    colors = {
+        'NVDA': '#76B900',
+        'MSFT': '#00A4EF',
+        'META': '#0866FF',
+        'GOOGL': '#4285F4',
+        'CHGG': '#FF6B6B',
+        'SPY': '#888888'
+    }
+
+    # Add traces for each stock
+    for col in cumulative.columns:
+        line_width = 3 if col == 'CHGG' else 1.5
+        fig.add_trace(go.Scatter(
+            x=cumulative.index,
+            y=cumulative[col],
+            mode='lines',
+            name=col,
+            line=dict(
+                color=colors.get(col, '#333'),
+                width=line_width
+            ),
+            hovertemplate=f'{col}<br>Date: %{{x}}<br>Cumulative Return: %{{y:.2f}}x<extra></extra>'
+        ))
+
+    # Highlight Chegg crash period (April 25 - May 10, 2023)
+    crash_start = pd.Timestamp('2023-04-25')
+    crash_end = pd.Timestamp('2023-05-10')
+
+    fig.add_vrect(
+        x0=crash_start,
+        x1=crash_end,
+        fillcolor="rgba(255, 0, 0, 0.15)",
+        layer="below",
+        line_width=0,
+        annotation_text="Chegg Crash Zone",
+        annotation_position="top left",
+        annotation_font=dict(size=11, color="red")
+    )
+
+    # Add specific crash date annotation
+    fig.add_vline(
+        x=CHEGG_CRASH,
+        line_dash="solid",
+        line_color="red",
+        line_width=2
+    )
+
+    fig.add_annotation(
+        x=CHEGG_CRASH,
+        y=0.3,
+        text="May 2, 2023<br>Chegg -49%<br>in single day",
+        showarrow=True,
+        arrowhead=2,
+        arrowcolor="red",
+        font=dict(size=10, color="red"),
+        bgcolor="rgba(255,255,255,0.9)",
+        bordercolor="red",
+        borderwidth=1
+    )
+
+    # Add ChatGPT launch line
+    fig.add_vline(
+        x=CHATGPT_LAUNCH,
+        line_dash="dash",
+        line_color="blue",
+        line_width=1.5
+    )
+
+    fig.add_annotation(
+        x=CHATGPT_LAUNCH,
+        y=cumulative.max().max() * 0.9,
+        text="ChatGPT<br>Launch",
+        showarrow=False,
+        font=dict(size=10, color="blue"),
+        bgcolor="rgba(255,255,255,0.8)"
+    )
+
+    fig.update_layout(
+        title=dict(
+            text="<b>Cumulative Returns: The Chegg Crash in Context</b><br><sup>Highlighting the creative destruction moment</sup>",
+            font=dict(size=18)
+        ),
+        xaxis_title="Date",
+        yaxis_title="Cumulative Return (Starting at 1.0x)",
+        template="plotly_white",
+        height=500,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        hovermode='x unified'
+    )
+
+    # Add horizontal line at 1.0
+    fig.add_hline(y=1.0, line_dash="dot", line_color="gray", opacity=0.5)
+
+    return fig
+
+
 # Sidebar
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/3/38/Purdue_University_seal.svg/1200px-Purdue_University_seal.svg.png", width=100)
@@ -604,11 +874,12 @@ with col4:
 st.markdown("---")
 
 # Main charts
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📈 Price Performance",
     "📊 Total Returns",
     "🎯 Market Concentration",
-    "🔄 Regime Detection"
+    "🔄 Regime Detection",
+    "🔬 Deep Analysis"
 ])
 
 with tab1:
@@ -662,6 +933,86 @@ with tab4:
     - **Nov 30, 2022**: ChatGPT launch - immediate repricing begins
     - **May 24, 2023**: NVIDIA earnings confirm AI infrastructure demand
     """)
+
+with tab5:
+    st.markdown("### Pre vs Post ChatGPT: Statistical Comparison")
+    st.markdown("*Comparing 6 months before (Jun-Nov 2022) vs 6 months after (Dec 2022-May 2023)*")
+
+    # Statistics comparison table
+    comparison_table = create_comparison_table(data, CHATGPT_LAUNCH)
+    if comparison_table is not None:
+        # Style the dataframe
+        def style_comparison(val, metric):
+            if pd.isna(val):
+                return ''
+            if 'Return' in metric:
+                color = 'green' if val > 0 else 'red'
+                return f'color: {color}'
+            return ''
+
+        st.dataframe(
+            comparison_table.style.format({
+                col: '{:.2f}' for col in comparison_table.columns if col != 'Ticker'
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.markdown("""
+        **Key Observations:**
+        - **NVDA**: Sharpe ratio dramatically improved post-ChatGPT, reflecting the AI infrastructure thesis
+        - **CHGG**: Returns turned deeply negative with elevated volatility - classic disruption signature
+        - **Volatility changes**: Winners saw volatility increase (opportunity), losers saw volatility spike (risk)
+        """)
+    else:
+        st.warning("Insufficient data for statistical comparison")
+
+    st.markdown("---")
+
+    # Correlation heatmaps
+    st.markdown("### Correlation Structure Shift")
+
+    corr_fig = create_correlation_heatmaps(data, CHATGPT_LAUNCH)
+    if corr_fig is not None:
+        st.plotly_chart(corr_fig, use_container_width=True)
+
+        st.markdown("""
+        **Interpretation:**
+        - **Pre-ChatGPT**: Tech stocks moved largely together with the market
+        - **Post-ChatGPT**: AI winners (NVDA, MSFT, META, GOOGL) decoupled from the benchmark
+        - **CHGG correlation shift**: Chegg's correlation to tech leaders weakened as it became a disruption story
+        """)
+    else:
+        st.warning("Insufficient data for correlation analysis")
+
+    st.markdown("---")
+
+    # Chegg crash chart
+    st.markdown("### The Chegg Crash: Creative Destruction in Action")
+
+    crash_fig = create_chegg_crash_chart(data)
+    if crash_fig is not None:
+        st.plotly_chart(crash_fig, use_container_width=True)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("""
+            **What Happened on May 2, 2023:**
+            - Chegg reported Q1 2023 earnings
+            - CEO Dan Rosensweig cited ChatGPT impact
+            - Stock dropped **49% in a single day**
+            - Largest single-day drop in company history
+            """)
+        with col2:
+            st.markdown("""
+            **The Creative Destruction Thesis:**
+            - ChatGPT commoditized homework help
+            - Students migrated to free AI tools
+            - Chegg's subscription model disrupted
+            - Classic "sample space contraction" for incumbents
+            """)
+    else:
+        st.warning("Insufficient data for crash analysis")
 
 # Footer
 st.markdown("---")
