@@ -860,10 +860,10 @@ def create_portfolio_chart(portfolios, start_date):
     fig.add_hline(y=10000, line_dash="dot", line_color="gray", opacity=0.5,
                   annotation_text="Initial $10,000", annotation_position="right")
 
-    # Add key event lines
-    fig.add_vline(x=CHATGPT_LAUNCH, line_dash="dash", line_color="blue", line_width=1,
+    # Add key event lines (convert Timestamps to strings for Plotly compatibility)
+    fig.add_vline(x=str(CHATGPT_LAUNCH), line_dash="dash", line_color="blue", line_width=1,
                   annotation_text="ChatGPT Launch", annotation_position="top")
-    fig.add_vline(x=CHEGG_CRASH, line_dash="dash", line_color="red", line_width=1,
+    fig.add_vline(x=str(CHEGG_CRASH), line_dash="dash", line_color="red", line_width=1,
                   annotation_text="Chegg Crash", annotation_position="bottom")
 
     fig.update_layout(
