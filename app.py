@@ -731,6 +731,164 @@ def create_chegg_crash_chart(data):
     return fig
 
 
+def simulate_portfolio(data, start_date, initial_investment=10000):
+    """
+    Simulate portfolio performance for three strategies:
+    1. AI Winners: Equal weight NVDA, MSFT, META, GOOGL
+    2. Benchmark: 100% SPY
+    3. Disrupted: 100% CHGG
+    """
+    portfolios = {}
+
+    # Get common date range starting from start_date
+    all_dates = None
+    for ticker, df in data.items():
+        mask = df.index >= start_date
+        dates = df.index[mask]
+        if all_dates is None:
+            all_dates = set(dates)
+        else:
+            all_dates = all_dates.intersection(set(dates))
+
+    if not all_dates:
+        return None, None
+
+    all_dates = sorted(list(all_dates))
+
+    # Strategy 1: AI Winners (equal weight)
+    winners_available = [t for t in WINNERS if t in data]
+    if winners_available:
+        per_stock = initial_investment / len(winners_available)
+        portfolio_value = pd.Series(index=all_dates, dtype=float)
+
+        for date in all_dates:
+            total = 0
+            for ticker in winners_available:
+                df = data[ticker]
+                if date in df.index:
+                    # Find start price
+                    start_idx = df.index.get_indexer([start_date], method='nearest')[0]
+                    start_price = df['Close'].iloc[start_idx]
+                    current_price = df.loc[date, 'Close']
+                    shares = per_stock / start_price
+                    total += shares * current_price
+            portfolio_value[date] = total
+
+        portfolios['AI Winners'] = portfolio_value
+
+    # Strategy 2: SPY Benchmark
+    if 'SPY' in data:
+        df = data['SPY']
+        start_idx = df.index.get_indexer([start_date], method='nearest')[0]
+        start_price = df['Close'].iloc[start_idx]
+        shares = initial_investment / start_price
+
+        portfolio_value = pd.Series(index=all_dates, dtype=float)
+        for date in all_dates:
+            if date in df.index:
+                portfolio_value[date] = shares * df.loc[date, 'Close']
+
+        portfolios['SPY Benchmark'] = portfolio_value
+
+    # Strategy 3: CHGG (Disrupted)
+    if 'CHGG' in data:
+        df = data['CHGG']
+        start_idx = df.index.get_indexer([start_date], method='nearest')[0]
+        start_price = df['Close'].iloc[start_idx]
+        shares = initial_investment / start_price
+
+        portfolio_value = pd.Series(index=all_dates, dtype=float)
+        for date in all_dates:
+            if date in df.index:
+                portfolio_value[date] = shares * df.loc[date, 'Close']
+
+        portfolios['CHGG (Disrupted)'] = portfolio_value
+
+    # Create summary
+    summary_data = []
+    for name, values in portfolios.items():
+        if len(values) > 0:
+            final_value = values.iloc[-1]
+            total_return = ((final_value - initial_investment) / initial_investment) * 100
+            summary_data.append({
+                'Strategy': name,
+                'Initial Investment': f'${initial_investment:,.0f}',
+                'Final Value': f'${final_value:,.0f}',
+                'Total Return': f'{total_return:+.1f}%',
+                'Return_numeric': total_return
+            })
+
+    summary_df = pd.DataFrame(summary_data)
+
+    return portfolios, summary_df
+
+
+def create_portfolio_chart(portfolios, start_date):
+    """Create portfolio value over time chart."""
+    if not portfolios:
+        return None
+
+    fig = go.Figure()
+
+    colors = {
+        'AI Winners': '#2E7D32',
+        'SPY Benchmark': '#666666',
+        'CHGG (Disrupted)': '#C62828'
+    }
+
+    line_styles = {
+        'AI Winners': 'solid',
+        'SPY Benchmark': 'dot',
+        'CHGG (Disrupted)': 'dash'
+    }
+
+    for name, values in portfolios.items():
+        fig.add_trace(go.Scatter(
+            x=values.index,
+            y=values.values,
+            mode='lines',
+            name=name,
+            line=dict(
+                color=colors.get(name, '#333'),
+                dash=line_styles.get(name, 'solid'),
+                width=2.5
+            ),
+            hovertemplate=f'{name}<br>Date: %{{x}}<br>Value: $%{{y:,.0f}}<extra></extra>'
+        ))
+
+    # Add initial investment reference line
+    fig.add_hline(y=10000, line_dash="dot", line_color="gray", opacity=0.5,
+                  annotation_text="Initial $10,000", annotation_position="right")
+
+    # Add key event lines
+    fig.add_vline(x=CHATGPT_LAUNCH, line_dash="dash", line_color="blue", line_width=1,
+                  annotation_text="ChatGPT Launch", annotation_position="top")
+    fig.add_vline(x=CHEGG_CRASH, line_dash="dash", line_color="red", line_width=1,
+                  annotation_text="Chegg Crash", annotation_position="bottom")
+
+    fig.update_layout(
+        title=dict(
+            text=f"<b>Portfolio Simulator: $10,000 Investment</b><br><sup>Starting {start_date.strftime('%B %d, %Y')}</sup>",
+            font=dict(size=18)
+        ),
+        xaxis_title="Date",
+        yaxis_title="Portfolio Value ($)",
+        template="plotly_white",
+        height=500,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        hovermode='x unified',
+        yaxis=dict(tickformat='$,.0f')
+    )
+
+    return fig
+
+
 # Sidebar
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/3/38/Purdue_University_seal.svg/1200px-Purdue_University_seal.svg.png", width=100)
@@ -874,12 +1032,13 @@ with col4:
 st.markdown("---")
 
 # Main charts
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📈 Price Performance",
     "📊 Total Returns",
     "🎯 Market Concentration",
     "🔄 Regime Detection",
-    "🔬 Deep Analysis"
+    "🔬 Deep Analysis",
+    "💰 Portfolio Impact"
 ])
 
 with tab1:
@@ -1013,6 +1172,121 @@ with tab5:
             """)
     else:
         st.warning("Insufficient data for crash analysis")
+
+with tab6:
+    st.markdown("### Portfolio Impact Simulator")
+    st.markdown("*Compare investment strategies: AI Winners vs Market Benchmark vs Disrupted Stock*")
+
+    # Date slider for "What If" analysis
+    st.markdown("#### What If: Adjust Your Start Date")
+
+    # Get the date range from the data
+    min_date = pd.Timestamp('2022-10-01')
+    max_date = pd.Timestamp('2024-01-01')
+
+    # Create date slider
+    selected_date = st.slider(
+        "Select investment start date:",
+        min_value=min_date.to_pydatetime(),
+        max_value=max_date.to_pydatetime(),
+        value=CHATGPT_LAUNCH.to_pydatetime(),
+        format="MMM DD, YYYY",
+        help="Drag to see how results change based on when you invested"
+    )
+
+    selected_timestamp = pd.Timestamp(selected_date)
+
+    # Quick date buttons
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if st.button("ChatGPT Launch (Nov 30, 2022)", use_container_width=True):
+            selected_timestamp = CHATGPT_LAUNCH
+    with col2:
+        if st.button("Start of 2023", use_container_width=True):
+            selected_timestamp = pd.Timestamp('2023-01-03')
+    with col3:
+        if st.button("Before Chegg Crash (Apr 2023)", use_container_width=True):
+            selected_timestamp = pd.Timestamp('2023-04-01')
+    with col4:
+        if st.button("Mid 2023", use_container_width=True):
+            selected_timestamp = pd.Timestamp('2023-07-01')
+
+    st.markdown("---")
+
+    # Run simulation
+    portfolios, summary_df = simulate_portfolio(data, selected_timestamp, initial_investment=10000)
+
+    if portfolios and summary_df is not None and not summary_df.empty:
+        # Portfolio chart
+        portfolio_fig = create_portfolio_chart(portfolios, selected_timestamp)
+        if portfolio_fig:
+            st.plotly_chart(portfolio_fig, use_container_width=True)
+
+        # Summary table
+        st.markdown("#### Investment Summary")
+
+        # Style the summary table
+        display_df = summary_df[['Strategy', 'Initial Investment', 'Final Value', 'Total Return']].copy()
+
+        # Color code based on return
+        def color_return(val):
+            if '+' in str(val):
+                return 'color: green; font-weight: bold'
+            elif '-' in str(val):
+                return 'color: red; font-weight: bold'
+            return ''
+
+        styled_df = display_df.style.applymap(color_return, subset=['Total Return'])
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+
+        # Key insights
+        st.markdown("---")
+        st.markdown("#### Key Insights")
+
+        if len(summary_df) >= 3:
+            ai_return = summary_df[summary_df['Strategy'] == 'AI Winners']['Return_numeric'].values
+            spy_return = summary_df[summary_df['Strategy'] == 'SPY Benchmark']['Return_numeric'].values
+            chgg_return = summary_df[summary_df['Strategy'] == 'CHGG (Disrupted)']['Return_numeric'].values
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                if len(ai_return) > 0 and len(spy_return) > 0:
+                    alpha = ai_return[0] - spy_return[0]
+                    st.metric(
+                        "AI Winners Alpha vs SPY",
+                        f"{alpha:+.1f}%",
+                        delta="Outperformance" if alpha > 0 else "Underperformance"
+                    )
+
+            with col2:
+                if len(ai_return) > 0 and len(chgg_return) > 0:
+                    spread = ai_return[0] - chgg_return[0]
+                    st.metric(
+                        "Winner vs Loser Spread",
+                        f"{spread:+.1f}%",
+                        delta="Creative Destruction Gap"
+                    )
+
+            with col3:
+                if len(chgg_return) > 0:
+                    st.metric(
+                        "Disruption Impact (CHGG)",
+                        f"{chgg_return[0]:+.1f}%",
+                        delta="Value Destroyed",
+                        delta_color="inverse"
+                    )
+
+        st.markdown("""
+        **Investment Lessons from the AI Regime Shift:**
+        - **Timing matters, but direction matters more**: Even investing after the initial surge, AI infrastructure outperformed
+        - **Disruption is permanent**: CHGG never recovered - this wasn't a dip to buy
+        - **Concentration risk**: The AI winners diverged significantly from the broad market (SPY)
+        - **Regime shifts create asymmetric outcomes**: Winners gained multiples of what the market returned; losers lost most of their value
+        """)
+
+    else:
+        st.warning("Insufficient data for portfolio simulation. Try selecting a different date range.")
 
 # Footer
 st.markdown("---")
