@@ -66,6 +66,14 @@ LOSERS = ['CHGG']
 BENCHMARK = ['SPY']
 ALL_TICKERS = WINNERS + LOSERS + BENCHMARK
 
+# Historical events for CUSUM validation
+HISTORICAL_EVENTS = [
+    ('iPhone Launch', pd.Timestamp('2007-01-09')),
+    ('Bitcoin Surge', pd.Timestamp('2017-12-17')),
+    ('COVID Crash', pd.Timestamp('2020-03-11')),
+    ('ChatGPT Launch', pd.Timestamp('2022-11-30')),
+]
+
 
 @st.cache_data(ttl=3600)
 def fetch_risk_free_rate():
@@ -858,6 +866,168 @@ def simulate_portfolio(data, start_date, initial_investment=10000):
     return portfolios, summary_df
 
 
+@st.cache_data(ttl=3600)
+def fetch_historical_event_data():
+    """Fetch SPY data around each historical event for CUSUM validation."""
+    event_data = {}
+    for name, date in HISTORICAL_EVENTS:
+        start = (date - pd.Timedelta(days=365)).strftime('%Y-%m-%d')
+        end = (date + pd.Timedelta(days=180)).strftime('%Y-%m-%d')
+        try:
+            spy = yf.Ticker('SPY')
+            df = spy.history(start=start, end=end)
+            if not df.empty:
+                if df.index.tz is not None:
+                    df.index = df.index.tz_localize(None)
+                event_data[name] = df
+        except Exception:
+            pass
+    return event_data
+
+
+def validate_cusum_on_event(returns_series, event_date, threshold=2.0):
+    """Validate CUSUM detector against a known historical event.
+    Returns (detected, days_delta, closest_break_date)."""
+    break_dates = detect_regime_breaks(returns_series, threshold=threshold)
+    if not break_dates:
+        return False, None, None
+
+    # Find closest break to the actual event
+    deltas = [(bd, (bd - event_date).days) for bd in break_dates]
+    closest = min(deltas, key=lambda x: abs(x[1]))
+    return True, closest[1], closest[0]
+
+
+def calculate_regime_probability(recent_returns, full_returns):
+    """Calculate regime shift probability using CUSUM percentile rank.
+    recent_returns: last ~6 months of winner portfolio returns
+    full_returns: full history of winner portfolio returns for baseline distribution
+    Returns (probability, cusum_series, current_value)."""
+    if len(recent_returns) < 30 or len(full_returns) < 30:
+        return 0.0, pd.Series(dtype=float), 0.0
+
+    # Compute CUSUM on the full history for distribution baseline
+    full_std = full_returns.std()
+    full_mean = full_returns.mean()
+    if full_std == 0:
+        return 0.0, pd.Series(dtype=float), 0.0
+
+    full_standardized = (full_returns - full_mean) / full_std
+    full_cusum = full_standardized.cumsum()
+    full_abs_cusum = np.abs(full_cusum)
+
+    # Compute CUSUM on recent window
+    recent_standardized = (recent_returns - full_mean) / full_std
+    recent_cusum = recent_standardized.cumsum()
+    current_value = float(np.abs(recent_cusum.iloc[-1]))
+
+    # Percentile rank of current magnitude against full history
+    probability = float(stats.percentileofscore(full_abs_cusum.dropna(), current_value))
+
+    return probability, recent_cusum, current_value
+
+
+def assess_early_warnings(data, entropy_series):
+    """Assess early warning signals for regime shift.
+    Returns dict with entropy_trend, correlation_shift, volatility_regime."""
+    warnings_out = {}
+
+    # 1. Entropy trend: slope of last 60 days
+    if len(entropy_series.dropna()) >= 60:
+        recent_entropy = entropy_series.dropna().iloc[-60:]
+        x = np.arange(len(recent_entropy))
+        slope, _, _, _, _ = stats.linregress(x, recent_entropy.values)
+        # Falling entropy = increasing concentration = warning
+        if slope < -0.005:
+            status = 'red'
+            direction = 'Falling (concentration increasing)'
+        elif slope < 0:
+            status = 'yellow'
+            direction = 'Slightly falling'
+        else:
+            status = 'green'
+            direction = 'Stable or rising'
+        warnings_out['entropy_trend'] = {
+            'value': float(slope),
+            'direction': direction,
+            'status': status,
+            'label': 'Entropy Trend'
+        }
+    else:
+        warnings_out['entropy_trend'] = {
+            'value': 0.0, 'direction': 'Insufficient data',
+            'status': 'yellow', 'label': 'Entropy Trend'
+        }
+
+    # 2. Correlation shift: last 30d avg pairwise corr vs 90d-ago baseline
+    winner_returns = pd.DataFrame()
+    for ticker in WINNERS:
+        if ticker in data:
+            winner_returns[ticker] = data[ticker]['Close'].pct_change()
+    winner_returns = winner_returns.dropna()
+
+    if len(winner_returns) >= 120:
+        recent_corr = winner_returns.iloc[-30:].corr()
+        baseline_corr = winner_returns.iloc[-120:-90].corr()
+        # Average off-diagonal correlations
+        mask = np.ones(recent_corr.shape, dtype=bool)
+        np.fill_diagonal(mask, False)
+        recent_avg = recent_corr.values[mask].mean()
+        baseline_avg = baseline_corr.values[mask].mean()
+        corr_change = recent_avg - baseline_avg
+
+        if corr_change > 0.15:
+            status = 'red'
+            direction = f'Rising (+{corr_change:.2f}) — herding signal'
+        elif corr_change > 0.05:
+            status = 'yellow'
+            direction = f'Slightly rising (+{corr_change:.2f})'
+        else:
+            status = 'green'
+            direction = f'Stable ({corr_change:+.2f})'
+        warnings_out['correlation_shift'] = {
+            'value': float(corr_change),
+            'direction': direction,
+            'status': status,
+            'label': 'Correlation Structure'
+        }
+    else:
+        warnings_out['correlation_shift'] = {
+            'value': 0.0, 'direction': 'Insufficient data',
+            'status': 'yellow', 'label': 'Correlation Structure'
+        }
+
+    # 3. Volatility regime: last 30d realized vol vs 90d average
+    if len(winner_returns) >= 90:
+        avg_returns = winner_returns.mean(axis=1)
+        recent_vol = avg_returns.iloc[-30:].std() * np.sqrt(252)
+        baseline_vol = avg_returns.iloc[-90:].std() * np.sqrt(252)
+        vol_ratio = recent_vol / baseline_vol if baseline_vol > 0 else 1.0
+
+        if vol_ratio > 1.5:
+            status = 'red'
+            direction = f'Elevated ({vol_ratio:.1f}x baseline)'
+        elif vol_ratio > 1.2:
+            status = 'yellow'
+            direction = f'Slightly elevated ({vol_ratio:.1f}x baseline)'
+        else:
+            status = 'green'
+            direction = f'Normal ({vol_ratio:.1f}x baseline)'
+        warnings_out['volatility_regime'] = {
+            'value': float(vol_ratio),
+            'direction': direction,
+            'status': status,
+            'label': 'Volatility Regime'
+        }
+    else:
+        warnings_out['volatility_regime'] = {
+            'value': 1.0, 'direction': 'Insufficient data',
+            'status': 'yellow', 'label': 'Volatility Regime'
+        }
+
+    return warnings_out
+
+
 def create_portfolio_chart(portfolios, start_date):
     """Create portfolio value over time chart."""
     if not portfolios:
@@ -1062,13 +1232,14 @@ with col4:
 st.markdown("---")
 
 # Main charts
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📈 Price Performance",
     "📊 Total Returns",
     "🎯 Market Concentration",
     "🔄 Regime Detection",
     "🔬 Deep Analysis",
-    "💰 Portfolio Impact"
+    "💰 Portfolio Impact",
+    "🔮 Regime Prediction"
 ])
 
 with tab1:
@@ -1328,6 +1499,178 @@ with tab6:
 
     else:
         st.warning("Insufficient data for portfolio simulation. Try selecting a different date range.")
+
+with tab7:
+    st.markdown("### Regime Prediction & Early Warning System")
+    st.markdown("*Validating the CUSUM detector against history and surfacing forward-looking signals*")
+
+    # --- Section A: Historical Validation ---
+    st.markdown("#### Historical Validation")
+    st.markdown("Testing whether our CUSUM regime detector would have flagged known market-moving events using SPY returns.")
+
+    with st.spinner("Fetching historical event data..."):
+        event_data = fetch_historical_event_data()
+
+    if event_data:
+        val_cols = st.columns(len(HISTORICAL_EVENTS))
+        for i, (event_name, event_date) in enumerate(HISTORICAL_EVENTS):
+            with val_cols[i]:
+                if event_name in event_data:
+                    spy_returns = event_data[event_name]['Close'].pct_change().dropna()
+                    detected, days_delta, closest_date = validate_cusum_on_event(
+                        spy_returns, event_date, threshold=2.0
+                    )
+                    if detected:
+                        delta_label = f"{days_delta:+d} days" if days_delta is not None else "N/A"
+                        st.metric(
+                            label=event_name,
+                            value="Detected",
+                            delta=delta_label
+                        )
+                        st.caption(f"Event: {event_date.strftime('%Y-%m-%d')}")
+                        if closest_date:
+                            st.caption(f"Break: {closest_date.strftime('%Y-%m-%d')}")
+                    else:
+                        st.metric(
+                            label=event_name,
+                            value="Not Detected",
+                            delta="No break found",
+                            delta_color="off"
+                        )
+                        st.caption(f"Event: {event_date.strftime('%Y-%m-%d')}")
+                else:
+                    st.metric(
+                        label=event_name,
+                        value="No Data",
+                        delta="Fetch failed",
+                        delta_color="off"
+                    )
+    else:
+        st.warning("Could not fetch historical event data for validation.")
+
+    st.markdown("---")
+
+    # --- Section B: Current Regime Status ---
+    st.markdown("#### Current Regime Status")
+
+    # Use last 6 months of winner returns for probability
+    if len(avg_winner_returns) >= 126:
+        recent_returns = avg_winner_returns.iloc[-126:]
+    else:
+        recent_returns = avg_winner_returns
+
+    probability, cusum_series, current_cusum = calculate_regime_probability(
+        recent_returns, avg_winner_returns
+    )
+
+    prob_col1, prob_col2 = st.columns([1, 2])
+
+    with prob_col1:
+        st.metric(
+            label="Regime Shift Probability",
+            value=f"{probability:.0f}%",
+            delta="Based on CUSUM percentile rank"
+        )
+
+        # Gauge chart
+        if probability < 30:
+            gauge_color = "green"
+        elif probability < 60:
+            gauge_color = "orange"
+        else:
+            gauge_color = "red"
+
+        gauge_fig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=probability,
+            number={'suffix': '%'},
+            gauge={
+                'axis': {'range': [0, 100]},
+                'bar': {'color': gauge_color},
+                'steps': [
+                    {'range': [0, 30], 'color': 'rgba(0,200,0,0.15)'},
+                    {'range': [30, 60], 'color': 'rgba(255,165,0,0.15)'},
+                    {'range': [60, 100], 'color': 'rgba(255,0,0,0.15)'},
+                ],
+                'threshold': {
+                    'line': {'color': 'black', 'width': 2},
+                    'thickness': 0.75,
+                    'value': probability
+                }
+            },
+            title={'text': 'Shift Probability'}
+        ))
+        gauge_fig.update_layout(height=250, margin=dict(t=40, b=0, l=30, r=30))
+        st.plotly_chart(gauge_fig, use_container_width=True)
+
+    with prob_col2:
+        # CUSUM line chart with threshold bands
+        if len(cusum_series) > 0:
+            cusum_fig = go.Figure()
+            cusum_fig.add_trace(go.Scatter(
+                x=cusum_series.index,
+                y=cusum_series.values,
+                mode='lines',
+                name='CUSUM',
+                line=dict(color='#1E3A5F', width=2)
+            ))
+            # Add threshold bands
+            cusum_fig.add_hline(y=2.0, line_dash="dash", line_color="orange",
+                                annotation_text="Warning threshold", annotation_position="top left")
+            cusum_fig.add_hline(y=-2.0, line_dash="dash", line_color="orange")
+            cusum_fig.add_hline(y=3.0, line_dash="dash", line_color="red",
+                                annotation_text="Critical threshold", annotation_position="top left")
+            cusum_fig.add_hline(y=-3.0, line_dash="dash", line_color="red")
+            cusum_fig.update_layout(
+                title="Recent CUSUM Values (Last 6 Months)",
+                xaxis_title="Date",
+                yaxis_title="CUSUM Value",
+                template="plotly_white",
+                height=350
+            )
+            st.plotly_chart(cusum_fig, use_container_width=True)
+        else:
+            st.info("Insufficient data to compute CUSUM series.")
+
+    st.markdown("---")
+
+    # --- Section C: Early Warning Signals ---
+    st.markdown("#### Early Warning Signals")
+
+    warning_signals = assess_early_warnings(data, entropy)
+
+    signal_cols = st.columns(3)
+    for idx, (key, signal) in enumerate(warning_signals.items()):
+        with signal_cols[idx]:
+            color_map = {'green': '#28a745', 'yellow': '#ffc107', 'red': '#dc3545'}
+            bg_map = {'green': '#d4edda', 'yellow': '#fff3cd', 'red': '#f8d7da'}
+            color = color_map.get(signal['status'], '#6c757d')
+            bg = bg_map.get(signal['status'], '#e2e3e5')
+
+            st.markdown(
+                f"""<div style="background-color: {bg}; border-left: 5px solid {color};
+                padding: 1rem; border-radius: 5px; margin-bottom: 0.5rem;">
+                <strong style="color: {color};">{signal['label']}</strong><br>
+                <span style="font-size: 0.95rem;">{signal['direction']}</span>
+                </div>""",
+                unsafe_allow_html=True
+            )
+
+    st.markdown("""
+    **Signal Explanations:**
+    - **Entropy Trend**: Measures whether market concentration is increasing. Falling entropy suggests a winner-take-most dynamic is intensifying.
+    - **Correlation Structure**: Compares recent pairwise correlation among AI winners to their 90-day baseline. Rising correlation signals herding behavior.
+    - **Volatility Regime**: Compares recent 30-day realized volatility to the 90-day average. Elevated volatility often precedes or accompanies regime shifts.
+    """)
+
+    st.markdown("---")
+
+    # --- Section D: Disclaimer ---
+    st.warning(
+        "**Disclaimer:** This regime prediction analysis is experimental and intended for educational purposes only. "
+        "The signals and probabilities shown are based on simple statistical heuristics, not predictive models. "
+        "This is not financial advice. Past detection of regime shifts does not guarantee future predictive accuracy."
+    )
 
 # Footer
 st.markdown("---")
