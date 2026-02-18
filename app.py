@@ -68,6 +68,24 @@ ALL_TICKERS = WINNERS + LOSERS + BENCHMARK
 
 
 @st.cache_data(ttl=3600)
+def fetch_risk_free_rate():
+    """Fetch the 3-month Treasury yield from yfinance (^IRX = 13-week T-Bill).
+    Returns the annualized rate as a percentage (e.g. 4.5 for 4.5%).
+    Falls back to 4.5% if data is unavailable."""
+    DEFAULT_RATE = 4.5
+    try:
+        irx = yf.Ticker("^IRX")
+        hist = irx.history(period="5d")
+        if not hist.empty:
+            rate = hist['Close'].iloc[-1]
+            if pd.notna(rate) and 0 < rate < 20:
+                return float(rate)
+        return DEFAULT_RATE
+    except Exception:
+        return DEFAULT_RATE
+
+
+@st.cache_data(ttl=3600)
 def fetch_stock_data(tickers, start_date, end_date):
     """Fetch stock data from Yahoo Finance."""
     data = {}
@@ -461,8 +479,9 @@ def create_regime_chart(data, break_dates):
     return fig
 
 
-def calculate_period_statistics(data, start_date, end_date):
-    """Calculate statistics for a given period."""
+def calculate_period_statistics(data, start_date, end_date, risk_free_rate=4.5):
+    """Calculate statistics for a given period.
+    risk_free_rate: annualized risk-free rate as a percentage (e.g. 4.5 for 4.5%)."""
     stats_data = []
 
     for ticker, df in data.items():
@@ -480,7 +499,7 @@ def calculate_period_statistics(data, start_date, end_date):
 
         avg_return = daily_returns.mean() * 252 * 100  # Annualized %
         volatility = daily_returns.std() * np.sqrt(252) * 100  # Annualized %
-        sharpe = (avg_return / volatility) if volatility > 0 else 0
+        sharpe = ((avg_return - risk_free_rate) / volatility) if volatility > 0 else 0
 
         stats_data.append({
             'Ticker': ticker,
@@ -492,7 +511,7 @@ def calculate_period_statistics(data, start_date, end_date):
     return pd.DataFrame(stats_data)
 
 
-def create_comparison_table(data, base_date):
+def create_comparison_table(data, base_date, risk_free_rate=4.5):
     """Create pre vs post ChatGPT statistics comparison table."""
     # 6 months before and after
     pre_start = base_date - pd.Timedelta(days=180)
@@ -500,8 +519,8 @@ def create_comparison_table(data, base_date):
     post_start = base_date
     post_end = base_date + pd.Timedelta(days=180)
 
-    pre_stats = calculate_period_statistics(data, pre_start, pre_end)
-    post_stats = calculate_period_statistics(data, post_start, post_end)
+    pre_stats = calculate_period_statistics(data, pre_start, pre_end, risk_free_rate)
+    post_stats = calculate_period_statistics(data, post_start, post_end, risk_free_rate)
 
     if pre_stats.empty or post_stats.empty:
         return None
@@ -968,6 +987,7 @@ with st.spinner("Fetching market data..."):
         start_date='2022-10-01',
         end_date=datetime.now().strftime('%Y-%m-%d')
     )
+    risk_free_rate = fetch_risk_free_rate()
 
 if not data:
     st.error("Could not fetch stock data. Please check your internet connection and try again.")
@@ -1091,8 +1111,11 @@ with tab5:
     st.markdown("### Pre vs Post ChatGPT: Statistical Comparison")
     st.markdown("*Comparing 6 months before (Jun-Nov 2022) vs 6 months after (Dec 2022-May 2023)*")
 
+    st.info(f"**Risk-Free Rate:** {risk_free_rate:.2f}% annualized (3-Month Treasury Bill, ^IRX). "
+            "Sharpe ratios are calculated as (annualized return - risk-free rate) / annualized volatility.")
+
     # Statistics comparison table
-    comparison_table = create_comparison_table(data, CHATGPT_LAUNCH)
+    comparison_table = create_comparison_table(data, CHATGPT_LAUNCH, risk_free_rate)
     if comparison_table is not None:
         # Style the dataframe
         def style_comparison(val, metric):
