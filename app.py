@@ -87,7 +87,7 @@ def fetch_risk_free_rate():
 
 @st.cache_data(ttl=3600)
 def fetch_stock_data(tickers, start_date, end_date):
-    """Fetch stock data from Yahoo Finance."""
+    """Fetch stock data from Yahoo Finance, including shares outstanding for market cap."""
     data = {}
     for ticker in tickers:
         try:
@@ -97,6 +97,14 @@ def fetch_stock_data(tickers, start_date, end_date):
                 # Convert timezone-aware index to timezone-naive for consistent comparisons
                 if df.index.tz is not None:
                     df.index = df.index.tz_localize(None)
+                # Fetch shares outstanding for market cap calculation
+                try:
+                    shares = stock.info.get('sharesOutstanding')
+                    if shares and shares > 0:
+                        df['SharesOutstanding'] = shares
+                        df['MarketCap'] = df['Close'] * shares
+                except Exception:
+                    pass  # shares data unavailable; handled downstream
                 data[ticker] = df
         except Exception as e:
             st.warning(f"Could not fetch data for {ticker}: {e}")
@@ -142,42 +150,41 @@ def calculate_rolling_entropy(data, window=60):
     """
     Calculate rolling Shannon entropy of market cap weights.
     Higher entropy = more equal distribution, Lower entropy = more concentration.
+    Uses actual market cap (price x shares outstanding) when available,
+    falls back to price as proxy otherwise.
     """
-    # Create a combined price DataFrame
-    prices = pd.DataFrame()
+    # Build a DataFrame of market cap (or price as fallback) for each stock
+    market_caps = pd.DataFrame()
+    using_fallback = []
     for ticker, df in data.items():
         if ticker in WINNERS + LOSERS:  # Exclude benchmark
-            prices[ticker] = df['Close']
+            if 'MarketCap' in df.columns:
+                market_caps[ticker] = df['MarketCap']
+            else:
+                market_caps[ticker] = df['Close']
+                using_fallback.append(ticker)
 
-    prices = prices.dropna()
+    market_caps = market_caps.dropna()
 
-    if prices.empty:
-        return pd.Series(dtype=float)
+    if market_caps.empty:
+        return pd.Series(dtype=float), []
 
-    # Use price as proxy for relative weights
-    # In reality you'd use market cap, but this shows the concentration effect
     def shannon_entropy(weights):
         weights = weights / weights.sum()  # Normalize
         weights = weights[weights > 0]  # Remove zeros
         return -np.sum(weights * np.log2(weights))
 
-    entropy = prices.rolling(window=window).apply(
-        lambda x: shannon_entropy(x.iloc[-1] if len(x) > 0 else x),
-        raw=False
-    ).mean(axis=1)
-
-    # Actually calculate proper rolling entropy
     entropy_series = []
-    for i in range(len(prices)):
+    for i in range(len(market_caps)):
         if i < window:
             entropy_series.append(np.nan)
         else:
-            window_prices = prices.iloc[i]
-            weights = window_prices / window_prices.sum()
+            caps = market_caps.iloc[i]
+            weights = caps / caps.sum()
             ent = shannon_entropy(weights)
             entropy_series.append(ent)
 
-    return pd.Series(entropy_series, index=prices.index)
+    return pd.Series(entropy_series, index=market_caps.index), using_fallback
 
 
 def detect_regime_breaks(returns_series, threshold=2.5):
@@ -340,13 +347,13 @@ def create_returns_chart(returns_dict):
     return fig
 
 
-def create_entropy_chart(entropy_series, normalized_df):
-    """Create the rolling entropy chart."""
+def create_entropy_chart(entropy_series, data):
+    """Create the rolling entropy chart using market cap weights."""
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=True,
         vertical_spacing=0.1,
-        subplot_titles=("Market Concentration (Inverse Shannon Entropy)", "NVDA Dominance")
+        subplot_titles=("Market Concentration (Inverse Shannon Entropy)", "NVDA Market Cap Share")
     )
 
     # Inverse entropy (higher = more concentrated)
@@ -365,16 +372,25 @@ def create_entropy_chart(entropy_series, normalized_df):
         row=1, col=1
     )
 
-    # NVDA share of the group
-    if 'NVDA' in normalized_df.columns:
-        nvda_share = normalized_df['NVDA'] / normalized_df[WINNERS + LOSERS].sum(axis=1) * 100
+    # NVDA market cap share of the group
+    market_caps = pd.DataFrame()
+    for ticker, df in data.items():
+        if ticker in WINNERS + LOSERS:
+            if 'MarketCap' in df.columns:
+                market_caps[ticker] = df['MarketCap']
+            else:
+                market_caps[ticker] = df['Close']
+    market_caps = market_caps.dropna()
+
+    if 'NVDA' in market_caps.columns and not market_caps.empty:
+        nvda_share = market_caps['NVDA'] / market_caps.sum(axis=1) * 100
 
         fig.add_trace(
             go.Scatter(
                 x=nvda_share.index,
                 y=nvda_share,
                 mode='lines',
-                name='NVDA Weight %',
+                name='NVDA Market Cap %',
                 line=dict(color='#76B900', width=2)
             ),
             row=2, col=1
@@ -396,7 +412,7 @@ def create_entropy_chart(entropy_series, normalized_df):
     )
 
     fig.update_yaxes(title_text="Concentration", row=1, col=1)
-    fig.update_yaxes(title_text="NVDA Share (%)", row=2, col=1)
+    fig.update_yaxes(title_text="NVDA Market Cap Share (%)", row=2, col=1)
 
     return fig
 
@@ -996,7 +1012,7 @@ if not data:
 # Calculate metrics
 normalized_df = normalize_prices(data, CHATGPT_LAUNCH)
 returns = calculate_returns(data, CHATGPT_LAUNCH)
-entropy = calculate_rolling_entropy(data, window=60)
+entropy, entropy_fallback_tickers = calculate_rolling_entropy(data, window=60)
 
 # Calculate returns for regime detection
 winner_returns = pd.DataFrame()
@@ -1085,13 +1101,21 @@ with tab2:
         """)
 
 with tab3:
-    st.plotly_chart(create_entropy_chart(entropy, normalized_df), use_container_width=True)
+    st.plotly_chart(create_entropy_chart(entropy, data), use_container_width=True)
+
+    if entropy_fallback_tickers:
+        st.warning(f"Shares outstanding data unavailable for **{', '.join(entropy_fallback_tickers)}**. "
+                   "Using stock price as a proxy for those tickers.")
 
     st.markdown("""
     **Sample Space Expansion:** The decreasing entropy (increasing concentration) shows
     that the AI opportunity isn't evenly distributed. NVIDIA's share of the "AI winners"
     basket has grown dramatically, demonstrating **winner-take-most dynamics** in
     emerging technology markets.
+
+    *Methodology: Shannon entropy is calculated using actual market capitalization weights
+    (price x shares outstanding) rather than raw stock prices, giving a true picture of
+    economic concentration across these companies.*
     """)
 
 with tab4:
