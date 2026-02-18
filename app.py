@@ -18,6 +18,16 @@ from scipy.signal import find_peaks
 from datetime import datetime, timedelta
 import warnings
 warnings.filterwarnings('ignore')
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+try:
+    import openai
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
 
 # Page configuration
 st.set_page_config(
@@ -26,6 +36,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+if "ai_chat_history" not in st.session_state:
+    st.session_state.ai_chat_history = []
 
 # Custom CSS for cleaner look
 st.markdown("""
@@ -73,6 +86,25 @@ HISTORICAL_EVENTS = [
     ('COVID Crash', pd.Timestamp('2020-03-11')),
     ('ChatGPT Launch', pd.Timestamp('2022-11-30')),
 ]
+
+AI_ANALYST_SYSTEM_PROMPT = """You are an AI Market Analyst embedded in the ChatGPT Regime Shift Dashboard, \
+built for MGMT 69000: Mastering AI for Finance at Purdue University.
+
+Context:
+- This dashboard analyzes the ChatGPT launch (Nov 30, 2022) as a regime shift event in financial markets.
+- It follows the DRIVER methodology (Discover, Represent, Implement, Validate, Evolve, Reflect).
+- Tickers tracked — Winners (AI infrastructure): NVDA, MSFT, META, GOOGL. Losers (disrupted): CHGG. Benchmark: SPY.
+- Core thesis: ChatGPT triggered creative destruction (old business models like Chegg disrupted) and sample space \
+expansion (new AI-driven value chains emerged), producing winner-take-most dynamics.
+
+Your role:
+- Analyze the market data provided to you in the context of this regime shift thesis.
+- Reference specific numbers, trends, and signals from the data.
+- Connect observations to concepts like creative destruction, sample space expansion, entropy, and regime detection (CUSUM).
+- Be concise but insightful — aim for 2-4 paragraphs per analysis.
+- You may discuss market dynamics, statistical patterns, and historical parallels.
+- NEVER provide financial advice, buy/sell recommendations, or price targets. Always frame analysis as educational.
+- If asked about topics outside this dashboard's scope, politely redirect to the regime shift analysis."""
 
 
 @st.cache_data(ttl=3600)
@@ -1028,6 +1060,84 @@ def assess_early_warnings(data, entropy_series):
     return warnings_out
 
 
+def gather_market_context(data, returns, entropy, break_dates, avg_winner_returns, risk_free_rate):
+    """Collect current dashboard data into a formatted string for the AI analyst."""
+    lines = []
+
+    # Sorted returns
+    sorted_returns = sorted(returns.items(), key=lambda x: x[1], reverse=True)
+    lines.append("=== Current Returns Since ChatGPT Launch ===")
+    for ticker, ret in sorted_returns:
+        lines.append(f"  {ticker}: {ret:+.1f}%")
+    if sorted_returns:
+        lines.append(f"  Top performer: {sorted_returns[0][0]} ({sorted_returns[0][1]:+.1f}%)")
+        lines.append(f"  Worst performer: {sorted_returns[-1][0]} ({sorted_returns[-1][1]:+.1f}%)")
+
+    # Regime probability
+    if len(avg_winner_returns) >= 126:
+        recent = avg_winner_returns.iloc[-126:]
+    else:
+        recent = avg_winner_returns
+    probability, _, current_cusum = calculate_regime_probability(recent, avg_winner_returns)
+    lines.append(f"\n=== Regime Status ===")
+    lines.append(f"  Regime shift probability (CUSUM percentile): {probability:.0f}%")
+    lines.append(f"  Current CUSUM magnitude: {current_cusum:.2f}")
+
+    # Early warning signals
+    warning_signals = assess_early_warnings(data, entropy)
+    lines.append(f"\n=== Early Warning Signals ===")
+    for key, signal in warning_signals.items():
+        lines.append(f"  {signal['label']}: {signal['direction']} (status: {signal['status']})")
+
+    # Entropy
+    clean_entropy = entropy.dropna()
+    if len(clean_entropy) > 0:
+        lines.append(f"\n=== Market Concentration (Shannon Entropy) ===")
+        lines.append(f"  Latest entropy: {clean_entropy.iloc[-1]:.4f}")
+        if len(clean_entropy) >= 30:
+            lines.append(f"  30-day average: {clean_entropy.iloc[-30:].mean():.4f}")
+
+    # Break dates
+    if break_dates:
+        lines.append(f"\n=== Detected Regime Breaks ===")
+        for bd in break_dates:
+            lines.append(f"  {bd.strftime('%Y-%m-%d')}")
+
+    lines.append(f"\n=== Other ===")
+    lines.append(f"  Risk-free rate (3M T-Bill): {risk_free_rate:.2f}%")
+    lines.append(f"  Analysis date: {datetime.now().strftime('%Y-%m-%d')}")
+
+    return "\n".join(lines)
+
+
+def call_openai_analyst(messages, api_key):
+    """Call OpenAI API for market analysis. Returns (success: bool, text: str)."""
+    if not OPENAI_AVAILABLE:
+        return False, "The `openai` package is not installed. Run `pip install openai` to enable AI analysis."
+
+    if not api_key:
+        return False, "No API key found. Set `OPENAI_API_KEY` in your `.env` file to enable AI analysis."
+
+    try:
+        client = openai.OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            max_tokens=1500,
+            messages=[
+                {"role": "system", "content": AI_ANALYST_SYSTEM_PROMPT},
+            ] + messages,
+        )
+        return True, response.choices[0].message.content
+    except openai.AuthenticationError:
+        return False, "Invalid API key. Please check your `OPENAI_API_KEY` in the `.env` file."
+    except openai.RateLimitError:
+        return False, "Rate limit exceeded. Please wait a moment and try again."
+    except openai.APIError as e:
+        return False, f"OpenAI API error: {e}"
+    except Exception as e:
+        return False, f"Unexpected error calling OpenAI: {e}"
+
+
 def create_portfolio_chart(portfolios, start_date):
     """Create portfolio value over time chart."""
     if not portfolios:
@@ -1232,14 +1342,15 @@ with col4:
 st.markdown("---")
 
 # Main charts
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📈 Price Performance",
     "📊 Total Returns",
     "🎯 Market Concentration",
     "🔄 Regime Detection",
     "🔬 Deep Analysis",
     "💰 Portfolio Impact",
-    "🔮 Regime Prediction"
+    "🔮 Regime Prediction",
+    "🤖 AI Market Analyst"
 ])
 
 with tab1:
@@ -1670,6 +1781,78 @@ with tab7:
         "**Disclaimer:** This regime prediction analysis is experimental and intended for educational purposes only. "
         "The signals and probabilities shown are based on simple statistical heuristics, not predictive models. "
         "This is not financial advice. Past detection of regime shifts does not guarantee future predictive accuracy."
+    )
+
+with tab8:
+    st.markdown("### AI Market Analyst")
+    st.markdown("*Powered by GPT-4o — contextual analysis of the ChatGPT regime shift*")
+
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+
+    # Section A: Generate AI Analysis
+    if st.button("Generate AI Analysis", type="primary", use_container_width=True):
+        with st.spinner("Analyzing market data with GPT-4o..."):
+            context = gather_market_context(
+                data, returns, entropy, break_dates, avg_winner_returns, risk_free_rate
+            )
+            user_message = (
+                "Here is the latest data from the ChatGPT Regime Shift Dashboard. "
+                "Please provide a concise analysis covering: (1) the current state of the regime shift, "
+                "(2) what the early warning signals suggest, and (3) any notable patterns in the data.\n\n"
+                + context
+            )
+            messages = [{"role": "user", "content": user_message}]
+            success, response_text = call_openai_analyst(messages, api_key)
+
+            if success:
+                st.session_state.ai_chat_history = [
+                    {"role": "user", "content": user_message, "hidden": True},
+                    {"role": "assistant", "content": response_text},
+                ]
+            else:
+                st.error(response_text)
+
+    # Section B: Chat history display
+    for msg in st.session_state.ai_chat_history:
+        if msg.get("hidden"):
+            continue
+        avatar = "🤖" if msg["role"] == "assistant" else "👤"
+        with st.chat_message(msg["role"], avatar=avatar):
+            st.markdown(msg["content"])
+
+    # Section C: Follow-up chat
+    if len(st.session_state.ai_chat_history) > 0:
+        st.markdown("---")
+        followup = st.text_input(
+            "Ask a follow-up question:",
+            key="ai_followup_input",
+            placeholder="e.g., How does NVDA's performance compare to previous tech regime shifts?"
+        )
+        if st.button("Send", key="ai_send_btn") and followup.strip():
+            st.session_state.ai_chat_history.append(
+                {"role": "user", "content": followup.strip()}
+            )
+            api_messages = [
+                {"role": m["role"], "content": m["content"]}
+                for m in st.session_state.ai_chat_history
+            ]
+            success, response_text = call_openai_analyst(api_messages, api_key)
+            if success:
+                st.session_state.ai_chat_history.append(
+                    {"role": "assistant", "content": response_text}
+                )
+            else:
+                st.session_state.ai_chat_history.append(
+                    {"role": "assistant", "content": f"Error: {response_text}"}
+                )
+            st.rerun()
+
+    # Section D: Disclaimer
+    st.markdown("---")
+    st.warning(
+        "**Disclaimer:** This AI analysis is generated by GPT-4o (OpenAI) for educational purposes as part of "
+        "MGMT 69000: Mastering AI for Finance at Purdue University. It is **not financial advice**. The AI may "
+        "produce inaccurate or incomplete analysis. Always verify insights against primary data sources."
     )
 
 # Footer
