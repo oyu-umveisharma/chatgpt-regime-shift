@@ -1111,7 +1111,7 @@ def gather_market_context(data, returns, entropy, break_dates, avg_winner_return
 
 
 def call_openai_analyst(messages, api_key):
-    """Call OpenAI API for market analysis. Returns (success: bool, text: str)."""
+    """Call OpenRouter API for market analysis. Returns (success: bool, text: str)."""
     if not OPENAI_AVAILABLE:
         return False, "The `openai` package is not installed. Run `pip install openai` to enable AI analysis."
 
@@ -1119,9 +1119,16 @@ def call_openai_analyst(messages, api_key):
         return False, "No API key found. Set `OPENAI_API_KEY` in your `.env` file to enable AI analysis."
 
     try:
-        client = openai.OpenAI(api_key=api_key)
+        client = openai.OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+            default_headers={
+                "HTTP-Referer": "https://github.com/oyu-umveisharma/chatgpt-regime-shift",
+                "X-Title": "ChatGPT Regime Shift Dashboard",
+            },
+        )
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="openai/gpt-4o",
             max_tokens=1500,
             messages=[
                 {"role": "system", "content": AI_ANALYST_SYSTEM_PROMPT},
@@ -1133,9 +1140,9 @@ def call_openai_analyst(messages, api_key):
     except openai.RateLimitError:
         return False, "Rate limit exceeded. Please wait a moment and try again."
     except openai.APIError as e:
-        return False, f"OpenAI API error: {e}"
+        return False, f"OpenRouter API error: {e}"
     except Exception as e:
-        return False, f"Unexpected error calling OpenAI: {e}"
+        return False, f"Unexpected error calling OpenRouter: {e}"
 
 
 def create_portfolio_chart(portfolios, start_date):
