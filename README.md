@@ -126,7 +126,8 @@ How did the ChatGPT launch restructure market valuations across the AI value cha
 5. **Sharpe Ratio Comparison**: Pre/post analysis using live 3-month Treasury yield as risk-free rate
 6. **Forward-Looking Prediction**: CUSUM percentile ranking for regime shift probability, validated against historical events (iPhone launch, Bitcoin surge, COVID crash)
 7. **Early Warning System**: Entropy trend, correlation structure shift, and volatility regime signals
-8. **LLM-Powered Analysis**: GPT-4o contextual market analysis via OpenRouter with conversational follow-up
+8. **Inferential Statistical Tests**: Paired t-test, Wilcoxon signed-rank, Welch two-sample t-test, and Mann-Whitney U to confirm significance of the regime shift
+9. **LLM-Powered Analysis**: GPT-4o contextual market analysis via OpenRouter with conversational follow-up
 
 #### Mathematical Formulations
 
@@ -161,6 +162,19 @@ P(shift) = percentile_rank(|S_current|, |S_history|)
 ```
 Ranks the current CUSUM magnitude against the full historical distribution.
 
+**Inferential Tests:**
+
+| Test | Function | Purpose |
+|------|----------|---------|
+| Paired t-test | `scipy.stats.ttest_rel` | Pre vs post daily returns per ticker (assumes normality) |
+| Wilcoxon signed-rank | `scipy.stats.wilcoxon` | Non-parametric alternative to paired t-test |
+| Welch's t-test | `scipy.stats.ttest_ind` | Winners vs Losers group comparison (unequal variance) |
+| Mann-Whitney U | `scipy.stats.mannwhitneyu` | Non-parametric alternative to two-sample t-test |
+
+- p < 0.05 indicates statistical significance at the 5% level
+- Returns expressed in basis points (bps); 1 bps = 0.01%
+- Group tests confirm statistically significant Winner/Loser divergence post-ChatGPT
+
 ---
 
 ### I - Implement
@@ -173,7 +187,7 @@ Ranks the current CUSUM magnitude against the full historical distribution.
 | Data | yfinance | Yahoo Finance API wrapper |
 | Analysis | pandas, numpy | Data manipulation |
 | Visualization | Plotly | Interactive charts |
-| Statistics | scipy | Regime detection, linear regression |
+| Statistics | scipy | Regime detection, linear regression, inferential tests (t-test, Wilcoxon, Mann-Whitney) |
 | LLM Intelligence | OpenAI SDK + OpenRouter | GPT-4o market analysis and chat |
 | Configuration | python-dotenv | Environment variable management |
 
@@ -284,6 +298,7 @@ The dashboard provides visual confirmation:
 - [x] **Added portfolio simulator** — $10K investment comparison across AI Winners, SPY, and CHGG with adjustable dates
 - [x] **Added AI Market Analyst** — GPT-4o-powered contextual analysis with conversational follow-up via OpenRouter
 - [x] **Expanded ticker universe** — from 6 to 15 stocks: 9 AI winners (added AMD, AVGO, ORCL, CRM, PLTR) and 5 disrupted companies (added PRSO, TAL, UDMY, COUR)
+- [x] **Added inferential statistical tests** — paired t-test, Wilcoxon signed-rank, Welch two-sample t-test, and Mann-Whitney U confirming statistically significant Winner/Loser divergence
 
 #### Remaining Limitations
 
