@@ -2115,39 +2115,22 @@ with tab6:
     st.markdown("### Portfolio Impact Simulator")
     st.markdown("*Compare investment strategies: AI Winners vs Market Benchmark vs Disrupted Stock*")
 
-    # Date slider for "What If" analysis
-    st.markdown("#### What If: Adjust Your Start Date")
+    # Simplified date selection
+    DATE_OPTIONS = {
+        "ChatGPT Launch (Nov 30, 2022)": pd.Timestamp('2022-11-30'),
+        "Start of 2023 (Jan 3)": pd.Timestamp('2023-01-03'),
+        "Post-Chegg Crash (Jun 2023)": pd.Timestamp('2023-06-01'),
+        "Start of 2024 (Jan 2)": pd.Timestamp('2024-01-02'),
+        "Start of 2025 (Jan 2)": pd.Timestamp('2025-01-02'),
+    }
 
-    # Get the date range from the data
-    min_date = pd.Timestamp('2022-10-01')
-    max_date = pd.Timestamp('2024-01-01')
-
-    # Create date slider
-    selected_date = st.slider(
+    selected_label = st.select_slider(
         "Select investment start date:",
-        min_value=min_date.to_pydatetime(),
-        max_value=max_date.to_pydatetime(),
-        value=CHATGPT_LAUNCH.to_pydatetime(),
-        format="MMM DD, YYYY",
-        help="Drag to see how results change based on when you invested"
+        options=list(DATE_OPTIONS.keys()),
+        value="ChatGPT Launch (Nov 30, 2022)",
     )
 
-    selected_timestamp = pd.Timestamp(selected_date)
-
-    # Quick date buttons
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        if st.button("ChatGPT Launch (Nov 30, 2022)", use_container_width=True):
-            selected_timestamp = CHATGPT_LAUNCH
-    with col2:
-        if st.button("Start of 2023", use_container_width=True):
-            selected_timestamp = pd.Timestamp('2023-01-03')
-    with col3:
-        if st.button("Before Chegg Crash (Apr 2023)", use_container_width=True):
-            selected_timestamp = pd.Timestamp('2023-04-01')
-    with col4:
-        if st.button("Mid 2023", use_container_width=True):
-            selected_timestamp = pd.Timestamp('2023-07-01')
+    selected_timestamp = DATE_OPTIONS[selected_label]
 
     st.markdown("---")
 
