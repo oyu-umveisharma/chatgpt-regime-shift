@@ -439,7 +439,15 @@ The dashboard provides visual confirmation across 8 tabs:
 
 ### E — Evolve
 
-#### Project 2 Improvements
+#### Project Evolution: Project 1 → Project 2 → Final Project
+
+| Milestone | Date | Key Additions | Feedback Addressed |
+|-----------|------|---------------|-------------------|
+| **Project 1** | Feb 4, 2026 | Initial 6-tab dashboard with 6 tickers, Shannon entropy, CUSUM regime detection, pre/post statistical comparison | *Initial submission* |
+| **Project 2** | Feb 18, 2026 | Fixed entropy (market cap), fixed Sharpe ratio (^IRX), regime prediction tab, historical CUSUM validation, early warning system, portfolio simulator, AI Market Analyst tab | "Entropy should use market cap not price", "Sharpe ratio needs risk-free rate", "Add forward-looking analysis" |
+| **Final Project** | Feb 28, 2026 | 15 tickers, inferential tests, sector entropy, sample space expansion, CI/CD pipeline, simplified slider | "Expand ticker universe", "Add statistical tests", "Use sector-level entropy", "Measure sample space directly", "Simplify slider" |
+
+#### Project 1 → Project 2 Improvements
 
 - [x] Fixed entropy calculation — actual market capitalization (price × shares outstanding) instead of price proxy
 - [x] Fixed Sharpe ratio — subtracts live 3-month Treasury yield (^IRX) instead of raw return/volatility
@@ -449,7 +457,7 @@ The dashboard provides visual confirmation across 8 tabs:
 - [x] Added portfolio simulator — $10K investment comparison across AI Winners, SPY, and Disrupted Basket
 - [x] Added AI Market Analyst — GPT-4o-powered contextual analysis with conversational follow-up via OpenRouter
 
-#### Final Project Improvements
+#### Project 2 → Final Project Improvements
 
 - [x] **Expanded ticker universe** — 6 to 15 stocks: 9 AI winners (added AMD, AVGO, ORCL, CRM, PLTR) and 5 disrupted companies (added PRSO, TAL, UDMY, COUR)
 - [x] **Added inferential statistical tests** — paired t-test, Wilcoxon signed-rank, Welch's two-sample t-test, and Mann-Whitney U confirming statistically significant Winner/Loser divergence

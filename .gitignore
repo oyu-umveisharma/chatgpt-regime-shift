@@ -1,9 +1,14 @@
-# Environment
+# Environment & API Keys
 .env
+.env.*
+!.env.example
 .venv/
 venv/
 env/
 ENV/
+credentials.json
+*.key
+*.pem
 
 # Python
 __pycache__/
