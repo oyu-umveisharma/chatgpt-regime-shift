@@ -10,6 +10,8 @@
 
 A CI/CD-validated, production-grade Streamlit dashboard analyzing the ChatGPT Launch (November 30, 2022) as a regime shift event in financial markets. Tracks 15 stocks across 4 sectors, applies inferential statistical testing, measures sample space expansion directly, and integrates GPT-4o-powered market analysis — all backed by 21 automated unit tests running on every commit.
 
+> **[AI Collaboration Log](AI_LOG.md)** — Full documentation of the AI-assisted development process, prompts used, code generated, and validation steps for each Final Project feature.
+
 ---
 
 ## Features at a Glance
@@ -309,6 +311,7 @@ chatgpt-regime-shift/
 ├── app.py                          # Main Streamlit application (~2200 lines)
 ├── requirements.txt                # Python dependencies (10 packages)
 ├── README.md                       # DRIVER methodology documentation
+├── AI_LOG.md                       # AI collaboration log (required deliverable)
 ├── validate.py                     # Manual validation script
 ├── .gitignore                      # Git ignore rules
 ├── .env                            # OpenRouter API key (not committed)
