@@ -74,10 +74,33 @@ CHEGG_CRASH = pd.Timestamp('2023-05-02')
 NVIDIA_EARNINGS = pd.Timestamp('2023-05-24')
 
 # Stock tickers
-WINNERS = ['NVDA', 'MSFT', 'META', 'GOOGL']
-LOSERS = ['CHGG']
+WINNERS = ['NVDA', 'MSFT', 'META', 'GOOGL', 'AMD', 'AVGO', 'ORCL', 'CRM', 'PLTR']
+LOSERS = ['CHGG', 'PRSO', 'TAL', 'UDMY', 'COUR']
 BENCHMARK = ['SPY']
 ALL_TICKERS = WINNERS + LOSERS + BENCHMARK
+
+# Centralized color scheme
+TICKER_COLORS = {
+    # Winners (greens, blues, purples)
+    'NVDA': '#76B900', 'MSFT': '#00A4EF', 'META': '#0866FF', 'GOOGL': '#4285F4',
+    'AMD': '#7B2D8E', 'AVGO': '#1B5E20', 'ORCL': '#00897B', 'CRM': '#1565C0',
+    'PLTR': '#5C6BC0',
+    # Losers (reds, oranges)
+    'CHGG': '#FF6B6B', 'PRSO': '#E53935', 'TAL': '#FF8A65', 'UDMY': '#D32F2F',
+    'COUR': '#FF7043',
+    # Benchmark
+    'SPY': '#888888',
+}
+
+def get_ticker_style(ticker):
+    """Return (color, dash, width) for a ticker."""
+    color = TICKER_COLORS.get(ticker, '#333333')
+    if ticker in WINNERS:
+        return color, 'solid', 2
+    elif ticker in LOSERS:
+        return color, 'dash', 2
+    else:
+        return color, 'dot', 1.5
 
 # Historical events for CUSUM validation
 HISTORICAL_EVENTS = [
@@ -93,9 +116,10 @@ built for MGMT 69000: Mastering AI for Finance at Purdue University.
 Context:
 - This dashboard analyzes the ChatGPT launch (Nov 30, 2022) as a regime shift event in financial markets.
 - It follows the DRIVER methodology (Discover, Represent, Implement, Validate, Evolve, Reflect).
-- Tickers tracked — Winners (AI infrastructure): NVDA, MSFT, META, GOOGL. Losers (disrupted): CHGG. Benchmark: SPY.
-- Core thesis: ChatGPT triggered creative destruction (old business models like Chegg disrupted) and sample space \
-expansion (new AI-driven value chains emerged), producing winner-take-most dynamics.
+- Tickers tracked — Winners (AI infrastructure): NVDA, MSFT, META, GOOGL, AMD, AVGO, ORCL, CRM, PLTR. \
+Losers (disrupted): CHGG, PRSO, TAL, UDMY, COUR. Benchmark: SPY.
+- Core thesis: ChatGPT triggered creative destruction (old business models like Chegg, Pearson, and online learning \
+platforms disrupted) and sample space expansion (new AI-driven value chains emerged), producing winner-take-most dynamics.
 
 Your role:
 - Analyze the market data provided to you in the context of this regime shift thesis.
@@ -254,36 +278,14 @@ def create_normalized_chart(normalized_df):
     """Create the normalized price chart with event annotations."""
     fig = go.Figure()
 
-    # Color scheme
-    colors = {
-        'NVDA': '#76B900',   # NVIDIA green
-        'MSFT': '#00A4EF',   # Microsoft blue
-        'META': '#0866FF',   # Meta blue
-        'GOOGL': '#4285F4',  # Google blue
-        'CHGG': '#FF6B6B',   # Red for loser
-        'SPY': '#888888'     # Gray for benchmark
-    }
-
-    line_styles = {
-        'NVDA': 'solid',
-        'MSFT': 'solid',
-        'META': 'solid',
-        'GOOGL': 'solid',
-        'CHGG': 'dash',
-        'SPY': 'dot'
-    }
-
     for col in normalized_df.columns:
+        color, dash, width = get_ticker_style(col)
         fig.add_trace(go.Scatter(
             x=normalized_df.index,
             y=normalized_df[col],
             mode='lines',
             name=col,
-            line=dict(
-                color=colors.get(col, '#333'),
-                dash=line_styles.get(col, 'solid'),
-                width=2 if col != 'SPY' else 1.5
-            ),
+            line=dict(color=color, dash=dash, width=width),
             hovertemplate=f'{col}<br>Date: %{{x}}<br>Value: %{{y:.1f}}<extra></extra>'
         ))
 
@@ -703,28 +705,18 @@ def create_chegg_crash_chart(data):
 
     fig = go.Figure()
 
-    # Color scheme
-    colors = {
-        'NVDA': '#76B900',
-        'MSFT': '#00A4EF',
-        'META': '#0866FF',
-        'GOOGL': '#4285F4',
-        'CHGG': '#FF6B6B',
-        'SPY': '#888888'
-    }
-
     # Add traces for each stock
     for col in cumulative.columns:
-        line_width = 3 if col == 'CHGG' else 1.5
+        color, dash, width = get_ticker_style(col)
+        # Emphasize CHGG as the primary crash story
+        if col == 'CHGG':
+            width = 3
         fig.add_trace(go.Scatter(
             x=cumulative.index,
             y=cumulative[col],
             mode='lines',
             name=col,
-            line=dict(
-                color=colors.get(col, '#333'),
-                width=line_width
-            ),
+            line=dict(color=color, dash=dash, width=width),
             hovertemplate=f'{col}<br>Date: %{{x}}<br>Cumulative Return: %{{y:.2f}}x<extra></extra>'
         ))
 
@@ -865,19 +857,25 @@ def simulate_portfolio(data, start_date, initial_investment=10000):
 
         portfolios['SPY Benchmark'] = portfolio_value
 
-    # Strategy 3: CHGG (Disrupted)
-    if 'CHGG' in data:
-        df = data['CHGG']
-        start_idx = df.index.get_indexer([start_date], method='nearest')[0]
-        start_price = df['Close'].iloc[start_idx]
-        shares = initial_investment / start_price
-
+    # Strategy 3: Disrupted (equal weight across LOSERS)
+    losers_available = [t for t in LOSERS if t in data]
+    if losers_available:
+        per_stock = initial_investment / len(losers_available)
         portfolio_value = pd.Series(index=all_dates, dtype=float)
-        for date in all_dates:
-            if date in df.index:
-                portfolio_value[date] = shares * df.loc[date, 'Close']
 
-        portfolios['CHGG (Disrupted)'] = portfolio_value
+        for date in all_dates:
+            total = 0
+            for ticker in losers_available:
+                df = data[ticker]
+                if date in df.index:
+                    start_idx = df.index.get_indexer([start_date], method='nearest')[0]
+                    start_price = df['Close'].iloc[start_idx]
+                    current_price = df.loc[date, 'Close']
+                    shares = per_stock / start_price
+                    total += shares * current_price
+            portfolio_value[date] = total
+
+        portfolios['Disrupted Basket'] = portfolio_value
 
     # Create summary
     summary_data = []
@@ -1155,13 +1153,13 @@ def create_portfolio_chart(portfolios, start_date):
     colors = {
         'AI Winners': '#2E7D32',
         'SPY Benchmark': '#666666',
-        'CHGG (Disrupted)': '#C62828'
+        'Disrupted Basket': '#C62828'
     }
 
     line_styles = {
         'AI Winners': 'solid',
         'SPY Benchmark': 'dot',
-        'CHGG (Disrupted)': 'dash'
+        'Disrupted Basket': 'dash'
     }
 
     for name, values in portfolios.items():
@@ -1330,11 +1328,12 @@ with col2:
     )
 
 with col3:
-    chgg_return = returns.get('CHGG', 0)
+    loser_returns = [returns.get(t, 0) for t in LOSERS if t in returns]
+    avg_loser_return = sum(loser_returns) / len(loser_returns) if loser_returns else 0
     st.metric(
-        label="Chegg (CHGG)",
-        value=f"{chgg_return:.1f}%",
-        delta="Disrupted Model",
+        label=f"Disrupted Avg ({len(loser_returns)} stocks)",
+        value=f"{avg_loser_return:.1f}%",
+        delta="Disrupted Models",
         delta_color="inverse"
     )
 
@@ -1576,7 +1575,7 @@ with tab6:
         if len(summary_df) >= 3:
             ai_return = summary_df[summary_df['Strategy'] == 'AI Winners']['Return_numeric'].values
             spy_return = summary_df[summary_df['Strategy'] == 'SPY Benchmark']['Return_numeric'].values
-            chgg_return = summary_df[summary_df['Strategy'] == 'CHGG (Disrupted)']['Return_numeric'].values
+            disrupted_return = summary_df[summary_df['Strategy'] == 'Disrupted Basket']['Return_numeric'].values
 
             col1, col2, col3 = st.columns(3)
 
@@ -1590,8 +1589,8 @@ with tab6:
                     )
 
             with col2:
-                if len(ai_return) > 0 and len(chgg_return) > 0:
-                    spread = ai_return[0] - chgg_return[0]
+                if len(ai_return) > 0 and len(disrupted_return) > 0:
+                    spread = ai_return[0] - disrupted_return[0]
                     st.metric(
                         "Winner vs Loser Spread",
                         f"{spread:+.1f}%",
@@ -1599,10 +1598,10 @@ with tab6:
                     )
 
             with col3:
-                if len(chgg_return) > 0:
+                if len(disrupted_return) > 0:
                     st.metric(
-                        "Disruption Impact (CHGG)",
-                        f"{chgg_return[0]:+.1f}%",
+                        "Disruption Impact",
+                        f"{disrupted_return[0]:+.1f}%",
                         delta="Value Destroyed",
                         delta_color="inverse"
                     )
@@ -1610,7 +1609,7 @@ with tab6:
         st.markdown("""
         **Investment Lessons from the AI Regime Shift:**
         - **Timing matters, but direction matters more**: Even investing after the initial surge, AI infrastructure outperformed
-        - **Disruption is permanent**: CHGG never recovered - this wasn't a dip to buy
+        - **Disruption is permanent**: Disrupted companies (CHGG, education platforms) never recovered - these weren't dips to buy
         - **Concentration risk**: The AI winners diverged significantly from the broad market (SPY)
         - **Regime shifts create asymmetric outcomes**: Winners gained multiples of what the market returned; losers lost most of their value
         """)

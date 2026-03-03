@@ -97,7 +97,16 @@ How did the ChatGPT launch restructure market valuations across the AI value cha
 | **Winner** | MSFT | OpenAI partnership, Azure AI services |
 | **Winner** | META | AI research, LLaMA models, ad optimization |
 | **Winner** | GOOGL | AI research heritage, Gemini, cloud AI |
-| **Loser** | CHGG | Education tech, homework help disrupted |
+| **Winner** | AMD | AI chip competitor, data center GPUs |
+| **Winner** | AVGO | Broadcom — AI networking, custom accelerators |
+| **Winner** | ORCL | Oracle — cloud AI infrastructure |
+| **Winner** | CRM | Salesforce — enterprise AI (Einstein, Agentforce) |
+| **Winner** | PLTR | Palantir — AI analytics, government/enterprise AI |
+| **Loser** | CHGG | Chegg — homework help disrupted by ChatGPT |
+| **Loser** | PRSO | Pearson — traditional education publisher |
+| **Loser** | TAL | TAL Education — tutoring services disrupted |
+| **Loser** | UDMY | Udemy — online learning marketplace |
+| **Loser** | COUR | Coursera — online course platform |
 | **Benchmark** | SPY | S&P 500 market benchmark |
 
 #### Key Dates
@@ -274,10 +283,11 @@ The dashboard provides visual confirmation:
 - [x] **Added early warning system** — entropy trend, correlation structure shift, volatility regime monitoring
 - [x] **Added portfolio simulator** — $10K investment comparison across AI Winners, SPY, and CHGG with adjustable dates
 - [x] **Added AI Market Analyst** — GPT-4o-powered contextual analysis with conversational follow-up via OpenRouter
+- [x] **Expanded ticker universe** — from 6 to 15 stocks: 9 AI winners (added AMD, AVGO, ORCL, CRM, PLTR) and 5 disrupted companies (added PRSO, TAL, UDMY, COUR)
 
 #### Remaining Limitations
 
-1. **Limited Universe**: 6 tickers — could expand to include AMD, AVGO, education publishers
+1. **Universe Scope**: 15 tickers across AI infrastructure, disrupted education, and benchmark — could add more sectors (content creation, advertising)
 2. **No Real-Time Streaming**: Data refreshes on page load (1-hour cache)
 3. **Single LLM Provider**: Currently GPT-4o only; could add model selection
 
