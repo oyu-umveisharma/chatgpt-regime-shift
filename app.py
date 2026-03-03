@@ -1502,6 +1502,162 @@ with tab5:
     else:
         st.warning("Insufficient data for crash analysis")
 
+    st.markdown("---")
+
+    # Statistical Significance Testing
+    st.markdown("### Statistical Significance Testing")
+    st.markdown("*Inferential tests confirming whether the ChatGPT regime shift produced statistically significant changes*")
+
+    # Define periods
+    pre_start = CHATGPT_LAUNCH - pd.Timedelta(days=180)
+    pre_end = CHATGPT_LAUNCH - pd.Timedelta(days=1)
+    post_start = CHATGPT_LAUNCH
+    post_end = CHATGPT_LAUNCH + pd.Timedelta(days=180)
+
+    # Build per-ticker pre/post daily returns
+    test_results = []
+    ticker_pre_returns = {}
+    ticker_post_returns = {}
+
+    for ticker, df in data.items():
+        daily = df['Close'].pct_change().dropna()
+        pre = daily[(daily.index >= pre_start) & (daily.index <= pre_end)]
+        post = daily[(daily.index >= post_start) & (daily.index <= post_end)]
+        if len(pre) >= 20 and len(post) >= 20:
+            ticker_pre_returns[ticker] = pre
+            ticker_post_returns[ticker] = post
+
+    # --- Test 1: Paired t-test per ticker (pre vs post mean daily return) ---
+    st.markdown("#### 1. Pre vs Post Returns by Ticker")
+    st.markdown("Paired comparison of daily return distributions before and after ChatGPT launch.")
+
+    per_ticker_rows = []
+    for ticker in ALL_TICKERS:
+        if ticker not in ticker_pre_returns:
+            continue
+        pre = ticker_pre_returns[ticker]
+        post = ticker_post_returns[ticker]
+        # Align to same length for paired test
+        min_len = min(len(pre), len(post))
+        pre_aligned = pre.values[:min_len]
+        post_aligned = post.values[:min_len]
+
+        # Paired t-test
+        t_stat, t_pval = stats.ttest_rel(post_aligned, pre_aligned)
+        # Wilcoxon signed-rank test
+        try:
+            w_stat, w_pval = stats.wilcoxon(post_aligned - pre_aligned)
+        except ValueError:
+            w_stat, w_pval = float('nan'), float('nan')
+
+        category = "Winner" if ticker in WINNERS else ("Loser" if ticker in LOSERS else "Benchmark")
+        per_ticker_rows.append({
+            'Ticker': ticker,
+            'Category': category,
+            'Pre Mean (bps)': pre.mean() * 10000,
+            'Post Mean (bps)': post.mean() * 10000,
+            't-stat': t_stat,
+            't p-value': t_pval,
+            't Sig': '\u2713' if t_pval < 0.05 else '\u2717',
+            'Wilcoxon W': w_stat,
+            'W p-value': w_pval,
+            'W Sig': '\u2713' if w_pval < 0.05 else '\u2717',
+        })
+
+    if per_ticker_rows:
+        ticker_test_df = pd.DataFrame(per_ticker_rows)
+        st.dataframe(
+            ticker_test_df.style.format({
+                'Pre Mean (bps)': '{:.1f}',
+                'Post Mean (bps)': '{:.1f}',
+                't-stat': '{:.3f}',
+                't p-value': '{:.4f}',
+                'Wilcoxon W': '{:.0f}',
+                'W p-value': '{:.4f}',
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.warning("Insufficient data for per-ticker tests.")
+
+    # --- Test 2: Winners vs Losers (two-sample t-test) ---
+    st.markdown("#### 2. Winners vs Losers: Post-ChatGPT Divergence")
+    st.markdown("Two-sample t-test comparing average daily returns of the Winners group vs the Losers group after ChatGPT launch.")
+
+    winner_post_all = []
+    loser_post_all = []
+    for ticker in WINNERS:
+        if ticker in ticker_post_returns:
+            winner_post_all.extend(ticker_post_returns[ticker].values)
+    for ticker in LOSERS:
+        if ticker in ticker_post_returns:
+            loser_post_all.extend(ticker_post_returns[ticker].values)
+
+    if len(winner_post_all) >= 20 and len(loser_post_all) >= 20:
+        import numpy as np
+        winner_arr = np.array(winner_post_all)
+        loser_arr = np.array(loser_post_all)
+
+        t2_stat, t2_pval = stats.ttest_ind(winner_arr, loser_arr, equal_var=False)
+
+        group_rows = [{
+            'Test': 'Two-Sample t-test (Welch)',
+            'Winners Mean (bps)': winner_arr.mean() * 10000,
+            'Losers Mean (bps)': loser_arr.mean() * 10000,
+            'Difference (bps)': (winner_arr.mean() - loser_arr.mean()) * 10000,
+            't-statistic': t2_stat,
+            'p-value': t2_pval,
+            'Significant': '\u2713' if t2_pval < 0.05 else '\u2717',
+        }]
+
+        # Wilcoxon rank-sum (Mann-Whitney U) as non-parametric alternative
+        u_stat, u_pval = stats.mannwhitneyu(winner_arr, loser_arr, alternative='two-sided')
+        group_rows.append({
+            'Test': 'Mann-Whitney U',
+            'Winners Mean (bps)': winner_arr.mean() * 10000,
+            'Losers Mean (bps)': loser_arr.mean() * 10000,
+            'Difference (bps)': (winner_arr.mean() - loser_arr.mean()) * 10000,
+            't-statistic': u_stat,
+            'p-value': u_pval,
+            'Significant': '\u2713' if u_pval < 0.05 else '\u2717',
+        })
+
+        group_df = pd.DataFrame(group_rows)
+        st.dataframe(
+            group_df.style.format({
+                'Winners Mean (bps)': '{:.2f}',
+                'Losers Mean (bps)': '{:.2f}',
+                'Difference (bps)': '{:.2f}',
+                't-statistic': '{:.3f}',
+                'p-value': '{:.4f}',
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        if t2_pval < 0.05:
+            st.success(f"The divergence between Winners and Losers is **statistically significant** "
+                       f"(t = {t2_stat:.3f}, p = {t2_pval:.4f}). The regime shift produced meaningfully "
+                       f"different return distributions for AI infrastructure vs disrupted companies.")
+        else:
+            st.info(f"The divergence is **not statistically significant** at the 5% level "
+                    f"(t = {t2_stat:.3f}, p = {t2_pval:.4f}).")
+    else:
+        st.warning("Insufficient data for group comparison test.")
+
+    # Methodology note
+    st.markdown("---")
+    st.markdown("""
+    **Methodology Notes:**
+    - **Paired t-test** (`ttest_rel`): Compares pre vs post daily returns for the same stock. Assumes normally distributed differences.
+    - **Wilcoxon signed-rank test** (`wilcoxon`): Non-parametric alternative — does not assume normality. Tests whether the median difference is zero.
+    - **Two-sample t-test** (`ttest_ind`, Welch's): Compares Winners vs Losers group returns post-launch. Does not assume equal variance.
+    - **Mann-Whitney U** (`mannwhitneyu`): Non-parametric alternative to the two-sample t-test.
+    - **p < 0.05** indicates a statistically significant difference at the 5% level.
+    - Returns are expressed in **basis points (bps)** where 1 bps = 0.01%.
+    """)
+
 with tab6:
     st.markdown("### Portfolio Impact Simulator")
     st.markdown("*Compare investment strategies: AI Winners vs Market Benchmark vs Disrupted Stock*")
