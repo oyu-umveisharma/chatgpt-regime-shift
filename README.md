@@ -121,7 +121,7 @@ How did the ChatGPT launch restructure market valuations across the AI value cha
 
 1. **Normalized Price Chart**: Rebase all prices to 100 at ChatGPT launch to visualize relative performance
 2. **Total Returns**: Bar chart showing cumulative returns since launch
-3. **Rolling Shannon Entropy**: Measure market concentration using actual market capitalization (price × shares outstanding)
+3. **Rolling Shannon Entropy**: Stock-level and sector-level market concentration using actual market capitalization (price × shares outstanding)
 4. **Regime Detection**: CUSUM analysis to detect structural breaks
 5. **Sharpe Ratio Comparison**: Pre/post analysis using live 3-month Treasury yield as risk-free rate
 6. **Forward-Looking Prediction**: CUSUM percentile ranking for regime shift probability, validated against historical events (iPhone launch, Bitcoin surge, COVID crash)
@@ -148,6 +148,22 @@ Where MarketCap_i = Price_i × SharesOutstanding_i. Falls back to price as proxy
 C = 1 / H
 ```
 Higher values indicate more concentration (winner-take-most).
+
+**Sector-Level Entropy:**
+```
+SectorCap_s = Σ MarketCap_i  (for all tickers i in sector s)
+w_s = SectorCap_s / Σ SectorCap_j
+H_sector = -Σ w_s × log₂(w_s)
+```
+
+| Sector | Tickers |
+|--------|---------|
+| AI Infrastructure | NVDA, AMD, AVGO |
+| Cloud/Enterprise AI | MSFT, GOOGL, ORCL, CRM, PLTR |
+| Social/Consumer AI | META |
+| Education (Disrupted) | CHGG, PRSO, TAL, UDMY, COUR |
+
+Comparing stock-level vs sector-level entropy reveals whether concentration is happening *between* sectors or *within* them.
 
 **Sharpe Ratio:**
 ```
@@ -299,6 +315,7 @@ The dashboard provides visual confirmation:
 - [x] **Added AI Market Analyst** — GPT-4o-powered contextual analysis with conversational follow-up via OpenRouter
 - [x] **Expanded ticker universe** — from 6 to 15 stocks: 9 AI winners (added AMD, AVGO, ORCL, CRM, PLTR) and 5 disrupted companies (added PRSO, TAL, UDMY, COUR)
 - [x] **Added inferential statistical tests** — paired t-test, Wilcoxon signed-rank, Welch two-sample t-test, and Mann-Whitney U confirming statistically significant Winner/Loser divergence
+- [x] **Added sector-level entropy** — stocks grouped into 4 sectors with stock vs sector entropy comparison, stacked area chart, and treemap of current sector weights
 
 #### Remaining Limitations
 
