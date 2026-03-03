@@ -208,6 +208,9 @@ Ranks the current CUSUM magnitude against the full historical distribution.
 | Statistics | scipy | Regime detection, linear regression, inferential tests (t-test, Wilcoxon, Mann-Whitney) |
 | LLM Intelligence | OpenAI SDK + OpenRouter | GPT-4o market analysis and chat |
 | Configuration | python-dotenv | Environment variable management |
+| Testing | pytest | 21 unit tests across 7 test classes |
+| Linting | flake8 | Code style validation |
+| CI/CD | GitHub Actions | Automated testing on push/PR |
 
 #### Core Functions
 
@@ -246,11 +249,18 @@ def call_openai_analyst(messages, api_key)
 
 ```
 chatgpt-regime-shift/
-├── app.py              # Main Streamlit application (all tabs, functions, and UI)
-├── requirements.txt    # Python dependencies
-├── README.md           # This documentation (DRIVER methodology)
-├── .gitignore          # Git ignore rules
-└── .env                # OpenRouter API key (not committed)
+├── app.py                          # Main Streamlit application (all tabs, functions, and UI)
+├── requirements.txt                # Python dependencies
+├── README.md                       # This documentation (DRIVER methodology)
+├── validate.py                     # Manual validation script (imports, syntax, data, API key)
+├── .gitignore                      # Git ignore rules
+├── .env                            # OpenRouter API key (not committed)
+├── .github/
+│   └── workflows/
+│       └── ci.yml                  # GitHub Actions CI pipeline
+└── tests/
+    ├── __init__.py
+    └── test_app.py                 # 21 unit tests for core functions
 ```
 
 #### Key Implementation Decisions
@@ -263,6 +273,39 @@ chatgpt-regime-shift/
 6. **Market Cap Entropy**: Uses actual shares outstanding × price for Shannon entropy, falling back to price when unavailable
 7. **Session State for Chat**: `st.session_state.ai_chat_history` persists conversation across Streamlit reruns; resets on new analysis
 8. **OpenRouter Routing**: Uses the OpenAI SDK with a custom `base_url` to route through OpenRouter, avoiding direct OpenAI dependency
+
+#### CI/CD Pipeline
+
+The project uses **GitHub Actions** for continuous integration, triggered on every push and pull request to `main`.
+
+| Step | Tool | Description |
+|------|------|-------------|
+| Syntax Check | `py_compile` | Validates `app.py` has no syntax errors |
+| Unit Tests | `pytest` | Runs 21 tests across 7 test classes |
+| Linting | `flake8` | Style checks (warnings only, non-blocking) |
+
+**Test Suite (21 tests):**
+
+| Test Class | Tests | What It Validates |
+|------------|-------|-------------------|
+| `TestFetchRiskFreeRate` | 2 | Returns float between 0-20% |
+| `TestCalculateReturns` | 3 | Dict output, numeric values, positive drift → positive return |
+| `TestCalculateRollingEntropy` | 2 | Returns Series, values within [0, log₂(n)] bounds |
+| `TestDetectRegimeBreaks` | 4 | Returns list, detects known breaks, Timestamp types, handles short series |
+| `TestStatisticalTests` | 4 | Paired t-test, Wilcoxon, Welch's t-test, Mann-Whitney U |
+| `TestCalculateRegimeProbability` | 2 | Returns (float, Series, float) tuple, probability in [0, 100] |
+| `TestGetTickerStyle` | 4 | Winner/loser/benchmark/unknown ticker styling |
+
+**Import Strategy:** Tests use a comprehensive Streamlit/yfinance mock that allows importing `app.py` functions without triggering UI code. A `_DummyContext` catch-all class handles all Streamlit context managers and calls, while `_SessionState(dict)` supports attribute-style access for `st.session_state`. Module-level UI code halts cleanly at `st.stop()` → `SystemExit` after all function definitions are loaded.
+
+**Run locally:**
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run manual validation (imports, syntax, data sources, API key)
+python validate.py
+```
 
 ---
 
@@ -319,6 +362,7 @@ The dashboard provides visual confirmation:
 - [x] **Added inferential statistical tests** — paired t-test, Wilcoxon signed-rank, Welch two-sample t-test, and Mann-Whitney U confirming statistically significant Winner/Loser divergence
 - [x] **Added sector-level entropy** — stocks grouped into 4 sectors with stock vs sector entropy comparison, stacked area chart, and treemap of current sector weights
 - [x] **Added sample space expansion analysis** — AI sector market cap growth multiple, $100B/$500B/$1T stock counts, threshold crossing timeline chart, and historical comparison to dot-com and mobile regime shifts
+- [x] **Added CI/CD pipeline** — GitHub Actions workflow with syntax check, 21 pytest unit tests across 7 test classes, and flake8 linting on every push/PR
 
 #### Remaining Limitations
 
