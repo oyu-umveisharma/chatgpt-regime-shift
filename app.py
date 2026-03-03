@@ -1864,6 +1864,253 @@ with tab5:
     - Returns are expressed in **basis points (bps)** where 1 bps = 0.01%.
     """)
 
+    st.markdown("---")
+
+    # ===== Sample Space Expansion Analysis =====
+    st.markdown("### Sample Space Expansion")
+    st.markdown("*Directly measuring whether ChatGPT created a new investable asset class*")
+
+    # Build combined AI winners market cap over time
+    ai_market_cap = pd.DataFrame()
+    for ticker in WINNERS:
+        if ticker in data:
+            df = data[ticker]
+            if 'MarketCap' in df.columns:
+                ai_market_cap[ticker] = df['MarketCap']
+            else:
+                ai_market_cap[ticker] = df['Close']
+    ai_market_cap = ai_market_cap.dropna()
+
+    spy_market_cap = None
+    if 'SPY' in data:
+        spy_df = data['SPY']
+        if 'MarketCap' in spy_df.columns:
+            spy_market_cap = spy_df['MarketCap']
+        else:
+            spy_market_cap = spy_df['Close']
+
+    if not ai_market_cap.empty:
+        total_ai_cap = ai_market_cap.sum(axis=1)
+
+        # --- Pre vs Post metrics ---
+        pre_idx = ai_market_cap.index.get_indexer([CHATGPT_LAUNCH], method='nearest')[0]
+        pre_cap = total_ai_cap.iloc[pre_idx]
+        post_cap = total_ai_cap.iloc[-1]
+        growth_multiple = post_cap / pre_cap if pre_cap > 0 else 0
+
+        # Count stocks above $100B, $500B, $1T at launch vs now
+        pre_caps = ai_market_cap.iloc[pre_idx]
+        post_caps = ai_market_cap.iloc[-1]
+
+        # Use actual market cap if available, else skip threshold counts
+        has_real_mcap = any('MarketCap' in data[t].columns for t in WINNERS if t in data)
+
+        if has_real_mcap:
+            pre_100b = int((pre_caps > 100e9).sum())
+            post_100b = int((post_caps > 100e9).sum())
+            pre_500b = int((pre_caps > 500e9).sum())
+            post_500b = int((post_caps > 500e9).sum())
+            pre_1t = int((pre_caps > 1e12).sum())
+            post_1t = int((post_caps > 1e12).sum())
+
+        # AI as % of SPY (proxy for market weight)
+        pre_ai_pct = None
+        post_ai_pct = None
+        if spy_market_cap is not None and len(spy_market_cap) > pre_idx:
+            # SPY price * ~500 constituents is not true market cap,
+            # so we use ratio change as a relative measure
+            spy_pre = spy_market_cap.iloc[pre_idx]
+            spy_post = spy_market_cap.iloc[-1]
+            if spy_pre > 0 and spy_post > 0:
+                pre_ai_pct = (pre_cap / spy_pre)
+                post_ai_pct = (post_cap / spy_post)
+
+        # Sample Space Expansion Score
+        expansion_score = growth_multiple
+
+        # --- Display metrics row ---
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric(
+                label="AI Sector Growth Multiple",
+                value=f"{growth_multiple:.1f}x",
+                delta=f"${pre_cap/1e12:.1f}T → ${post_cap/1e12:.1f}T"
+            )
+        with m2:
+            if has_real_mcap:
+                st.metric(
+                    label="AI Stocks > $100B Market Cap",
+                    value=f"{post_100b}",
+                    delta=f"+{post_100b - pre_100b} since launch"
+                )
+            else:
+                st.metric(
+                    label="AI Sector Total",
+                    value=f"${post_cap/1e12:.1f}T",
+                    delta=f"+{(growth_multiple - 1) * 100:.0f}%"
+                )
+        with m3:
+            if pre_ai_pct is not None:
+                change = ((post_ai_pct / pre_ai_pct) - 1) * 100
+                st.metric(
+                    label="AI/SPY Ratio Change",
+                    value=f"+{change:.0f}%",
+                    delta="AI grew faster than the market"
+                )
+            else:
+                st.metric(
+                    label="Expansion Score",
+                    value=f"{expansion_score:.1f}x",
+                    delta="Post/pre market cap ratio"
+                )
+
+        # --- Pre vs Post comparison table ---
+        st.markdown("#### Pre vs Post ChatGPT Comparison")
+
+        comparison_rows = [
+            {
+                'Metric': 'AI Sector Total Market Cap',
+                'Pre-ChatGPT': f'${pre_cap/1e12:.2f}T',
+                'Post-ChatGPT (Current)': f'${post_cap/1e12:.2f}T',
+                'Change': f'+{(growth_multiple - 1) * 100:.0f}%',
+            },
+        ]
+
+        if has_real_mcap:
+            comparison_rows.extend([
+                {
+                    'Metric': 'AI Stocks > $100B Market Cap',
+                    'Pre-ChatGPT': str(pre_100b),
+                    'Post-ChatGPT (Current)': str(post_100b),
+                    'Change': f'+{post_100b - pre_100b}',
+                },
+                {
+                    'Metric': 'AI Stocks > $500B Market Cap',
+                    'Pre-ChatGPT': str(pre_500b),
+                    'Post-ChatGPT (Current)': str(post_500b),
+                    'Change': f'+{post_500b - pre_500b}',
+                },
+                {
+                    'Metric': 'AI Stocks > $1T Market Cap',
+                    'Pre-ChatGPT': str(pre_1t),
+                    'Post-ChatGPT (Current)': str(post_1t),
+                    'Change': f'+{post_1t - pre_1t}',
+                },
+            ])
+
+        if pre_ai_pct is not None:
+            comparison_rows.append({
+                'Metric': 'AI/SPY Ratio (relative weight)',
+                'Pre-ChatGPT': f'{pre_ai_pct:.1f}',
+                'Post-ChatGPT (Current)': f'{post_ai_pct:.1f}',
+                'Change': f'+{((post_ai_pct / pre_ai_pct) - 1) * 100:.0f}%',
+            })
+
+        st.dataframe(
+            pd.DataFrame(comparison_rows),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.markdown("---")
+
+        # --- Chart: Combined AI market cap over time with threshold annotations ---
+        st.markdown("#### AI Sector Market Cap Expansion")
+
+        expansion_fig = go.Figure()
+
+        # Stacked area by ticker
+        for ticker in WINNERS:
+            if ticker in ai_market_cap.columns:
+                color, _, _ = get_ticker_style(ticker)
+                expansion_fig.add_trace(go.Scatter(
+                    x=ai_market_cap.index,
+                    y=ai_market_cap[ticker],
+                    mode='lines',
+                    name=ticker,
+                    line=dict(width=0.5, color=color),
+                    stackgroup='one',
+                    hovertemplate=f'{ticker}<br>${{y:,.0f}}<extra></extra>'
+                ))
+
+        # Add threshold lines
+        thresholds = [(1e12, '$1T'), (2e12, '$2T'), (5e12, '$5T'), (10e12, '$10T')]
+        for threshold, label in thresholds:
+            if total_ai_cap.max() >= threshold:
+                expansion_fig.add_hline(
+                    y=threshold, line_dash="dot", line_color="rgba(0,0,0,0.3)",
+                    annotation_text=label, annotation_position="right"
+                )
+
+                # Find first date crossing
+                crossing = total_ai_cap[total_ai_cap >= threshold]
+                if not crossing.empty:
+                    cross_date = crossing.index[0]
+                    expansion_fig.add_annotation(
+                        x=cross_date, y=threshold,
+                        text=f"Crossed {label}<br>{cross_date.strftime('%b %Y')}",
+                        showarrow=True, arrowhead=2, arrowcolor="#666",
+                        font=dict(size=9), bgcolor="rgba(255,255,255,0.8)",
+                        bordercolor="#666", borderwidth=1, borderpad=3
+                    )
+
+        # ChatGPT launch line
+        expansion_fig.add_vline(x=CHATGPT_LAUNCH, line_dash="dash", line_color="blue", line_width=1.5)
+        expansion_fig.add_annotation(
+            x=CHATGPT_LAUNCH, y=total_ai_cap.max() * 0.95,
+            text="ChatGPT Launch", showarrow=False,
+            font=dict(size=10, color="blue"), bgcolor="rgba(255,255,255,0.8)"
+        )
+
+        expansion_fig.update_layout(
+            title=dict(
+                text="<b>AI Sector Market Cap: Sample Space Expansion</b><br>"
+                     "<sup>Combined market capitalization of AI winner stocks over time</sup>",
+                font=dict(size=18)
+            ),
+            xaxis_title="Date",
+            yaxis_title="Market Cap ($)",
+            yaxis=dict(tickformat='$,.0s'),
+            template="plotly_white",
+            height=500,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            hovermode='x unified'
+        )
+        st.plotly_chart(expansion_fig, use_container_width=True)
+
+        # --- Historical expansion comparison ---
+        st.markdown("#### Historical Context: Technology Regime Shifts")
+
+        st.markdown("""
+        | Regime Shift | Period | Sample Space Expansion |
+        |-------------|--------|----------------------|
+        | **Dot-Com / Internet** | 1995-2000 | Internet stocks grew from <1% to ~6% of S&P 500; dozens of new IPOs created a new "internet sector" |
+        | **Mobile / Smartphone** | 2007-2012 | Apple grew from $100B to $500B; mobile app economy created entirely new revenue streams |
+        | **ChatGPT / AI** | 2022-Present | AI infrastructure sector grew **{growth_multiple:.1f}x**; NVIDIA alone added ~$2T+ in market cap |
+
+        The ChatGPT regime shift shows the hallmarks of a **sample space expansion event**:
+        """)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("""
+            **What expanded:**
+            - AI infrastructure became a distinct investable theme
+            - GPU/accelerator demand created new supply chain valuations
+            - Enterprise AI (CRM, PLTR, ORCL) revalued as AI plays
+            - AI-related ETFs proliferated (BOTZ, AIQ, ROBT)
+            """)
+        with col2:
+            st.markdown("""
+            **What contracted:**
+            - Education tech models commoditized by free AI
+            - Homework help services lost competitive moats
+            - Content creation platforms face AI substitution
+            - Traditional tutoring disrupted globally
+            """)
+    else:
+        st.warning("Insufficient market cap data for sample space analysis.")
+
 with tab6:
     st.markdown("### Portfolio Impact Simulator")
     st.markdown("*Compare investment strategies: AI Winners vs Market Benchmark vs Disrupted Stock*")
