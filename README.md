@@ -127,7 +127,8 @@ How did the ChatGPT launch restructure market valuations across the AI value cha
 6. **Forward-Looking Prediction**: CUSUM percentile ranking for regime shift probability, validated against historical events (iPhone launch, Bitcoin surge, COVID crash)
 7. **Early Warning System**: Entropy trend, correlation structure shift, and volatility regime signals
 8. **Inferential Statistical Tests**: Paired t-test, Wilcoxon signed-rank, Welch two-sample t-test, and Mann-Whitney U to confirm significance of the regime shift
-9. **LLM-Powered Analysis**: GPT-4o contextual market analysis via OpenRouter with conversational follow-up
+9. **Sample Space Expansion**: Direct measurement of AI sector market cap growth, threshold crossings, and historical regime shift comparison
+10. **LLM-Powered Analysis**: GPT-4o contextual market analysis via OpenRouter with conversational follow-up
 
 #### Mathematical Formulations
 
@@ -316,6 +317,7 @@ The dashboard provides visual confirmation:
 - [x] **Expanded ticker universe** — from 6 to 15 stocks: 9 AI winners (added AMD, AVGO, ORCL, CRM, PLTR) and 5 disrupted companies (added PRSO, TAL, UDMY, COUR)
 - [x] **Added inferential statistical tests** — paired t-test, Wilcoxon signed-rank, Welch two-sample t-test, and Mann-Whitney U confirming statistically significant Winner/Loser divergence
 - [x] **Added sector-level entropy** — stocks grouped into 4 sectors with stock vs sector entropy comparison, stacked area chart, and treemap of current sector weights
+- [x] **Added sample space expansion analysis** — AI sector market cap growth multiple, $100B/$500B/$1T stock counts, threshold crossing timeline chart, and historical comparison to dot-com and mobile regime shifts
 
 #### Remaining Limitations
 
