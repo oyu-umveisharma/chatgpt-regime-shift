@@ -92,6 +92,21 @@ TICKER_COLORS = {
     'SPY': '#888888',
 }
 
+# Sector groupings
+SECTORS = {
+    'AI Infrastructure': ['NVDA', 'AMD', 'AVGO'],
+    'Cloud/Enterprise AI': ['MSFT', 'GOOGL', 'ORCL', 'CRM', 'PLTR'],
+    'Social/Consumer AI': ['META'],
+    'Education (Disrupted)': ['CHGG', 'PRSO', 'TAL', 'UDMY', 'COUR'],
+}
+
+SECTOR_COLORS = {
+    'AI Infrastructure': '#76B900',
+    'Cloud/Enterprise AI': '#00A4EF',
+    'Social/Consumer AI': '#0866FF',
+    'Education (Disrupted)': '#FF6B6B',
+}
+
 def get_ticker_style(ticker):
     """Return (color, dash, width) for a ticker."""
     color = TICKER_COLORS.get(ticker, '#333333')
@@ -249,6 +264,47 @@ def calculate_rolling_entropy(data, window=60):
             entropy_series.append(ent)
 
     return pd.Series(entropy_series, index=market_caps.index), using_fallback
+
+
+def calculate_sector_entropy(data, window=60):
+    """Calculate rolling Shannon entropy at the sector level.
+    Aggregates market cap by sector, then computes entropy across sectors.
+    Returns (sector_entropy_series, sector_caps_df)."""
+    # Build per-ticker market cap
+    ticker_caps = pd.DataFrame()
+    for ticker, df in data.items():
+        if ticker == 'SPY':
+            continue
+        if 'MarketCap' in df.columns:
+            ticker_caps[ticker] = df['MarketCap']
+        else:
+            ticker_caps[ticker] = df['Close']
+    ticker_caps = ticker_caps.dropna()
+
+    if ticker_caps.empty:
+        return pd.Series(dtype=float), pd.DataFrame()
+
+    # Aggregate to sector level
+    sector_caps = pd.DataFrame(index=ticker_caps.index)
+    for sector, tickers in SECTORS.items():
+        cols = [t for t in tickers if t in ticker_caps.columns]
+        if cols:
+            sector_caps[sector] = ticker_caps[cols].sum(axis=1)
+
+    def shannon_entropy(weights):
+        weights = weights / weights.sum()
+        weights = weights[weights > 0]
+        return -np.sum(weights * np.log2(weights))
+
+    entropy_series = []
+    for i in range(len(sector_caps)):
+        if i < window:
+            entropy_series.append(np.nan)
+        else:
+            caps = sector_caps.iloc[i]
+            entropy_series.append(shannon_entropy(caps))
+
+    return pd.Series(entropy_series, index=sector_caps.index), sector_caps
 
 
 def detect_regime_breaks(returns_series, threshold=2.5):
@@ -1400,10 +1456,160 @@ with tab3:
     that the AI opportunity isn't evenly distributed. NVIDIA's share of the "AI winners"
     basket has grown dramatically, demonstrating **winner-take-most dynamics** in
     emerging technology markets.
+    """)
 
-    *Methodology: Shannon entropy is calculated using actual market capitalization weights
-    (price x shares outstanding) rather than raw stock prices, giving a true picture of
-    economic concentration across these companies.*
+    st.markdown("---")
+
+    # Sector-level entropy analysis
+    st.markdown("### Sector-Level Entropy Analysis")
+    st.markdown("*Aggregating stocks into sectors for a higher-level view of market concentration*")
+
+    sector_entropy, sector_caps = calculate_sector_entropy(data, window=60)
+
+    if len(sector_entropy.dropna()) > 0 and not sector_caps.empty:
+        # Chart 1: Stock-level vs Sector-level entropy comparison
+        entropy_compare_fig = go.Figure()
+
+        clean_stock_entropy = entropy.dropna()
+        clean_sector_entropy = sector_entropy.dropna()
+
+        if len(clean_stock_entropy) > 0:
+            entropy_compare_fig.add_trace(go.Scatter(
+                x=clean_stock_entropy.index,
+                y=clean_stock_entropy,
+                mode='lines',
+                name='Stock-Level Entropy',
+                line=dict(color='#8B5CF6', width=2),
+            ))
+
+        entropy_compare_fig.add_trace(go.Scatter(
+            x=clean_sector_entropy.index,
+            y=clean_sector_entropy,
+            mode='lines',
+            name='Sector-Level Entropy',
+            line=dict(color='#E65100', width=2, dash='dash'),
+        ))
+
+        for date in [CHATGPT_LAUNCH, CHEGG_CRASH, NVIDIA_EARNINGS]:
+            entropy_compare_fig.add_vline(x=date, line_dash="dash", line_color="rgba(0,0,0,0.2)")
+
+        entropy_compare_fig.update_layout(
+            title=dict(
+                text="<b>Stock-Level vs Sector-Level Shannon Entropy</b><br>"
+                     "<sup>Lower entropy = higher concentration</sup>",
+                font=dict(size=18)
+            ),
+            xaxis_title="Date",
+            yaxis_title="Shannon Entropy (bits)",
+            template="plotly_white",
+            height=400,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            hovermode='x unified'
+        )
+        st.plotly_chart(entropy_compare_fig, use_container_width=True)
+
+        # Chart 2: Sector market cap shares — stacked area
+        sector_shares = sector_caps.div(sector_caps.sum(axis=1), axis=0) * 100
+
+        stacked_fig = go.Figure()
+        for sector in SECTORS:
+            if sector in sector_shares.columns:
+                stacked_fig.add_trace(go.Scatter(
+                    x=sector_shares.index,
+                    y=sector_shares[sector],
+                    mode='lines',
+                    name=sector,
+                    line=dict(width=0.5, color=SECTOR_COLORS.get(sector, '#333')),
+                    stackgroup='one',
+                    hovertemplate=f'{sector}<br>%{{y:.1f}}%<extra></extra>'
+                ))
+
+        for date in [CHATGPT_LAUNCH, CHEGG_CRASH, NVIDIA_EARNINGS]:
+            stacked_fig.add_vline(x=date, line_dash="dash", line_color="rgba(0,0,0,0.3)")
+
+        stacked_fig.update_layout(
+            title=dict(
+                text="<b>Sector Market Cap Shares Over Time</b><br>"
+                     "<sup>How value distributes across AI sub-sectors</sup>",
+                font=dict(size=18)
+            ),
+            xaxis_title="Date",
+            yaxis_title="Market Cap Share (%)",
+            yaxis=dict(range=[0, 100]),
+            template="plotly_white",
+            height=400,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            hovermode='x unified'
+        )
+        st.plotly_chart(stacked_fig, use_container_width=True)
+
+        # Chart 3: Current sector weights — treemap
+        latest_caps = sector_caps.iloc[-1]
+        latest_total = latest_caps.sum()
+
+        treemap_labels = []
+        treemap_parents = []
+        treemap_values = []
+        treemap_colors = []
+
+        # Root
+        treemap_labels.append("All Sectors")
+        treemap_parents.append("")
+        treemap_values.append(0)
+        treemap_colors.append("#FFFFFF")
+
+        for sector in SECTORS:
+            if sector in latest_caps.index:
+                pct = latest_caps[sector] / latest_total * 100
+                treemap_labels.append(f"{sector}<br>{pct:.1f}%")
+                treemap_parents.append("All Sectors")
+                treemap_values.append(float(latest_caps[sector]))
+                treemap_colors.append(SECTOR_COLORS.get(sector, '#333'))
+
+        treemap_fig = go.Figure(go.Treemap(
+            labels=treemap_labels,
+            parents=treemap_parents,
+            values=treemap_values,
+            marker=dict(colors=treemap_colors),
+            textinfo="label",
+            hovertemplate='%{label}<br>Market Cap: $%{value:,.0f}<extra></extra>'
+        ))
+        treemap_fig.update_layout(
+            title=dict(
+                text="<b>Current Sector Weights</b>",
+                font=dict(size=18)
+            ),
+            height=400,
+            margin=dict(t=50, l=10, r=10, b=10)
+        )
+        st.plotly_chart(treemap_fig, use_container_width=True)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("""
+            **Sector Entropy** shows concentration at the **industry level** —
+            how value distributes across AI infrastructure, cloud/enterprise,
+            social/consumer AI, and disrupted education.
+            """)
+        with col2:
+            st.markdown("""
+            **Stock Entropy** shows concentration **within the AI ecosystem** —
+            how individual company market caps are distributed. A falling stock
+            entropy with stable sector entropy means one company dominates its sector.
+            """)
+    else:
+        st.warning("Insufficient data for sector-level entropy analysis.")
+
+    st.markdown("---")
+
+    st.markdown("""
+    *Methodology: Stock-level entropy uses individual market capitalizations
+    (price × shares outstanding). Sector-level entropy aggregates stocks into
+    four sectors — AI Infrastructure (NVDA, AMD, AVGO), Cloud/Enterprise AI
+    (MSFT, GOOGL, ORCL, CRM, PLTR), Social/Consumer AI (META), and Education
+    Disrupted (CHGG, PRSO, TAL, UDMY, COUR) — then computes Shannon entropy
+    across sector totals. Comparing both levels reveals whether concentration
+    is happening between sectors or within them.*
     """)
 
 with tab4:
