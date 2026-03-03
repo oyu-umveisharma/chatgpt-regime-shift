@@ -4,6 +4,7 @@
 
 An interactive Streamlit dashboard analyzing the ChatGPT Launch (November 30, 2022) as a regime shift event in financial markets, examining creative destruction and sample space expansion. Features 8 analytical tabs including forward-looking regime prediction and GPT-4o-powered market analysis.
 
+![CI](https://github.com/oyu-umveisharma/chatgpt-regime-shift/actions/workflows/ci.yml/badge.svg)
 ![Dashboard Preview](https://img.shields.io/badge/Streamlit-Dashboard-FF4B4B?logo=streamlit)
 ![Python](https://img.shields.io/badge/Python-3.9+-3776AB?logo=python)
 ![License](https://img.shields.io/badge/License-MIT-green)
